@@ -192,20 +192,16 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
 
+      - name: Install Trivy
+        run: |
+          sudo apt-get install -y wget apt-transport-https gnupg
+          wget -qO - https://aquasecurity.github.io/trivy-repo/deb/public.key | gpg --dearmor | sudo tee /usr/share/keyrings/trivy.gpg > /dev/null
+          echo "deb [signed-by=/usr/share/keyrings/trivy.gpg] https://aquasecurity.github.io/trivy-repo/deb generic main" | sudo tee /etc/apt/sources.list.d/trivy.list
+          sudo apt-get update
+          sudo apt-get install -y trivy
+
       - name: Scan relay image with Trivy
-        uses: aquasecurity/trivy-action@0.31.0
-        with:
-          image-ref: atlax-relay:ci
-          format: table
-          exit-code: 1
-          severity: CRITICAL,HIGH
-          version: "v0.62.1"
+        run: trivy image --exit-code 1 --severity CRITICAL,HIGH --format table atlax-relay:ci
 
       - name: Scan agent image with Trivy
-        uses: aquasecurity/trivy-action@0.31.0
-        with:
-          image-ref: atlax-agent:ci
-          format: table
-          exit-code: 1
-          severity: CRITICAL,HIGH
-          version: "v0.62.1"
+        run: trivy image --exit-code 1 --severity CRITICAL,HIGH --format table atlax-agent:ci
