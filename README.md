@@ -1,7 +1,7 @@
 # atlax
 
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
-[![Go](https://img.shields.io/badge/Go-1.23+-00ADD8.svg)](https://go.dev)
+[![Go](https://img.shields.io/badge/Go-1.25+-00ADD8.svg)](https://go.dev)
 
 A custom reverse TLS tunnel with TCP stream multiplexing, built in Go. Designed to bypass CGNAT by having customer nodes dial out to a relay with a public IP.
 

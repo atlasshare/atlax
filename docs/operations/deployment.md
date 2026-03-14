@@ -6,7 +6,7 @@ This guide covers deploying the `atlax-relay` and `atlax-agent` binaries in prod
 
 ## Prerequisites
 
-- Go 1.23+ (for building from source)
+- Go 1.25+ (for building from source)
 - Docker 24+ (for container deployments)
 - A public VPS with a static IPv4 address (for the relay)
 - Valid mTLS certificates (see [Certificate Operations](certificate-ops.md))
