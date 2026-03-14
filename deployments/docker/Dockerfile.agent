@@ -28,7 +28,8 @@ LABEL org.opencontainers.image.description="atlax tunnel agent - custom reverse 
 LABEL org.opencontainers.image.source="https://github.com/atlasshare/atlax"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
-RUN apk add --no-cache ca-certificates tzdata \
+RUN apk upgrade --no-cache \
+    && apk add --no-cache ca-certificates tzdata \
     && addgroup -g 10001 -S atlax \
     && adduser -u 10001 -S -G atlax -h /nonexistent -s /sbin/nologin atlax
 
