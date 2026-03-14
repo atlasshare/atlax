@@ -29,11 +29,12 @@ LABEL org.opencontainers.image.source="https://github.com/atlasshare/atlax"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
 RUN apk add --no-cache ca-certificates tzdata \
-    && adduser -D -u 65534 -g "" atlax
+    && addgroup -g 10001 -S atlax \
+    && adduser -u 10001 -S -G atlax -h /nonexistent -s /sbin/nologin atlax
 
 COPY --from=builder /atlax-relay /atlax-relay
 
-USER 65534
+USER atlax
 
 EXPOSE 8443
 
