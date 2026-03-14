@@ -166,7 +166,7 @@ jobs:
         uses: docker/setup-buildx-action@v3
 
       - name: Build relay image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deployments/docker/Dockerfile.relay
@@ -180,7 +180,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Build agent image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           file: deployments/docker/Dockerfile.agent
