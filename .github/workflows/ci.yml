@@ -148,7 +148,7 @@ jobs:
           ./cmd/agent/
 
       - name: Upload binaries
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: binaries-${{ matrix.goos }}-${{ matrix.goarch }}
           path: bin/
