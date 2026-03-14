@@ -194,7 +194,7 @@ jobs:
           cache-to: type=gha,mode=max
 
       - name: Scan relay image with Trivy
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.31.0
         with:
           image-ref: atlax-relay:ci
           format: table
@@ -202,7 +202,7 @@ jobs:
           severity: CRITICAL,HIGH
 
       - name: Scan agent image with Trivy
-        uses: aquasecurity/trivy-action@0.28.0
+        uses: aquasecurity/trivy-action@0.31.0
         with:
           image-ref: atlax-agent:ci
           format: table
