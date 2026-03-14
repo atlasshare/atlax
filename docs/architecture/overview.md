@@ -160,7 +160,7 @@ functionality from Enterprise capabilities:
 | Certificate management | Manual or script-based | Integrated with AtlasShare control plane API for automated CSR signing |
 
 The boundary is enforced through Go interfaces (`AgentRegistry`,
-`AuditEmitter`). Community implementations satisfy these interfaces with local,
+`audit.Emitter`). Community implementations satisfy these interfaces with local,
 single-process backends. Enterprise implementations inject distributed backends.
 No build tags or conditional compilation is used; the distinction is purely at
 the dependency injection level.

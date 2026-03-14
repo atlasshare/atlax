@@ -32,10 +32,10 @@ type Event struct {
 	Metadata   map[string]string
 }
 
-// AuditEmitter is an enterprise extension point. Community edition logs to
+// Emitter is an enterprise extension point. Community edition logs to
 // structured log output. Enterprise edition may emit to event buses, SIEM
 // systems, or append-only stores.
-type AuditEmitter interface {
+type Emitter interface {
 	// Emit records a single audit event.
 	Emit(ctx context.Context, event Event) error
 

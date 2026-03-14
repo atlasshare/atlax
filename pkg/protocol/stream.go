@@ -32,7 +32,7 @@ type Stream interface {
 	ReceiveWindow() int
 }
 
-// StreamConfig holds tunables for individual stream behaviour.
+// StreamConfig holds tunables for individual stream behavior.
 type StreamConfig struct {
 	InitialWindowSize int
 	MaxFrameSize      int

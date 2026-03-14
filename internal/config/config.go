@@ -83,8 +83,8 @@ type ServiceMapping struct {
 	RelayPort int
 }
 
-// ConfigLoader supports YAML config files and environment variable overrides.
-type ConfigLoader interface {
+// Loader supports YAML config files and environment variable overrides.
+type Loader interface {
 	// LoadRelayConfig reads and validates a relay configuration file.
 	LoadRelayConfig(path string) (*RelayConfig, error)
 

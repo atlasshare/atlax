@@ -16,11 +16,11 @@ const (
 
 // tlsOptions carries unexported settings applied through functional options.
 type tlsOptions struct {
-	minVersion   uint16
-	sessionCache tls.ClientSessionCache
+	MinVersion   uint16
+	SessionCache tls.ClientSessionCache
 }
 
-// TLSOption is a functional option for customising TLS configuration.
+// TLSOption is a functional option for customizing TLS configuration.
 type TLSOption func(*tlsOptions)
 
 // TLSConfigurator builds TLS configurations for both sides of the tunnel.

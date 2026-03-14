@@ -5,15 +5,15 @@ import (
 	"fmt"
 )
 
-// ProtocolError represents a wire protocol error tied to a specific stream.
-type ProtocolError struct {
+// Error represents a wire protocol error tied to a specific stream.
+type Error struct {
 	Code     uint32
 	Message  string
 	StreamID uint32
 }
 
 // Error returns a human-readable representation of the protocol error.
-func (e *ProtocolError) Error() string {
+func (e *Error) Error() string {
 	return fmt.Sprintf("protocol error on stream %d (code %d): %s", e.StreamID, e.Code, e.Message)
 }
 
