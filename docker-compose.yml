@@ -1,0 +1,81 @@
+services:
+  certs:
+    image: alpine:3.19
+    command: >
+      sh -c "
+        apk add --no-cache openssl bash &&
+        CERT_OUTPUT_DIR=/certs bash /scripts/gen-certs.sh
+      "
+    volumes:
+      - certs:/certs
+      - ./scripts:/scripts:ro
+    networks:
+      - relay-net
+
+  relay:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.relay
+    depends_on:
+      certs:
+        condition: service_completed_successfully
+    ports:
+      - "8443:8443"
+      - "9090:9090"
+      - "8080-8090:8080-8090"
+    volumes:
+      - certs:/certs:ro
+      - ./configs:/configs:ro
+    environment:
+      - ATLAX_CONFIG=/configs/relay.example.yaml
+      - ATLAX_TLS_CERT=/certs/relay.crt
+      - ATLAX_TLS_KEY=/certs/relay.key
+      - ATLAX_TLS_CA=/certs/root-ca.crt
+      - ATLAX_TLS_CLIENT_CA=/certs/customer-ca.crt
+    networks:
+      - relay-net
+    restart: unless-stopped
+
+  agent:
+    build:
+      context: .
+      dockerfile: deployments/docker/Dockerfile.agent
+    depends_on:
+      relay:
+        condition: service_started
+      certs:
+        condition: service_completed_successfully
+    volumes:
+      - certs:/certs:ro
+      - ./configs:/configs:ro
+    environment:
+      - ATLAX_CONFIG=/configs/agent.example.yaml
+      - ATLAX_TLS_CERT=/certs/agent.crt
+      - ATLAX_TLS_KEY=/certs/agent.key
+      - ATLAX_TLS_CA=/certs/root-ca.crt
+    networks:
+      - relay-net
+      - agent-internal
+    restart: unless-stopped
+
+  echo-server:
+    image: alpine:3.19
+    command: >
+      sh -c "
+        echo 'Starting TCP echo server on port 7000...' &&
+        while true; do nc -l -p 7000 -e cat; done
+      "
+    networks:
+      - agent-internal
+    restart: unless-stopped
+
+volumes:
+  certs:
+    driver: local
+
+networks:
+  relay-net:
+    driver: bridge
+  agent-internal:
+    driver: bridge
+    internal: true

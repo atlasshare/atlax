@@ -1,0 +1,71 @@
+# atlax tunnel agent configuration
+#
+# Copy this file to agent.yaml and adjust for your environment.
+# All values shown are defaults unless noted otherwise.
+
+relay:
+  # Relay server address (hostname:port)
+  addr: "relay.atlax.local:8443"
+
+  # TLS server name for certificate verification
+  server_name: "relay.atlax.local"
+
+  # Reconnection settings
+  reconnect_interval: 5s
+  reconnect_max_backoff: 300s
+  reconnect_jitter: true
+
+  # Keepalive interval (PING/PONG)
+  keepalive_interval: 30s
+  keepalive_timeout: 10s
+
+tls:
+  # Agent client certificate (signed by Customer Intermediate CA)
+  cert_file: /etc/atlax/certs/agent.crt
+  key_file: /etc/atlax/certs/agent.key
+
+  # Root CA certificate for verifying the relay server certificate chain
+  ca_file: /etc/atlax/certs/root-ca.crt
+
+  # Minimum TLS version (1.3 enforced, do not lower)
+  min_version: "1.3"
+
+# Local services to expose through the tunnel
+# The relay maps incoming client connections on the assigned port
+# to these local services via multiplexed streams.
+services:
+  - name: "samba"
+    # Local address the agent forwards traffic to
+    local_addr: "127.0.0.1:445"
+    # Protocol hint (for logging and metrics)
+    protocol: "tcp"
+    description: "SMB file sharing service"
+
+  - name: "web"
+    local_addr: "127.0.0.1:80"
+    protocol: "tcp"
+    description: "HTTP web service"
+
+logging:
+  # Log level: debug, info, warn, error
+  level: info
+
+  # Log format: json (recommended for production) or text
+  format: json
+
+  # Include source file and line number in log output
+  add_source: false
+
+update:
+  # Enable automatic self-update checks
+  enabled: false
+
+  # Update check interval
+  check_interval: 6h
+
+  # Update manifest URL (HTTPS required)
+  manifest_url: "https://updates.atlax.local/v1/manifest.json"
+
+  # ed25519 public key for verifying signed manifests
+  # In production, this is embedded at compile time via ldflags.
+  # public_key: ""

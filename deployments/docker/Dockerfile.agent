@@ -1,0 +1,38 @@
+# Stage 1: Build
+FROM golang:1.23-alpine AS builder
+
+ARG VERSION=dev
+ARG COMMIT=unknown
+
+RUN apk add --no-cache git ca-certificates
+
+WORKDIR /build
+
+COPY go.mod go.sum* ./
+RUN go mod download
+
+COPY . .
+
+RUN CGO_ENABLED=0 GOOS=linux go build \
+    -ldflags="-s -w \
+    -X github.com/atlasshare/atlax/internal/config.Version=${VERSION} \
+    -X github.com/atlasshare/atlax/internal/config.Commit=${COMMIT} \
+    -X github.com/atlasshare/atlax/internal/config.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -o /atlax-agent ./cmd/agent/
+
+# Stage 2: Runtime
+FROM alpine:3.19
+
+LABEL org.opencontainers.image.title="atlax-agent"
+LABEL org.opencontainers.image.description="atlax tunnel agent - custom reverse TLS tunnel with TCP stream multiplexing"
+LABEL org.opencontainers.image.source="https://github.com/atlasshare/atlax"
+LABEL org.opencontainers.image.licenses="Apache-2.0"
+
+RUN apk add --no-cache ca-certificates tzdata \
+    && adduser -D -u 65534 -g "" atlax
+
+COPY --from=builder /atlax-agent /atlax-agent
+
+USER 65534
+
+ENTRYPOINT ["/atlax-agent"]

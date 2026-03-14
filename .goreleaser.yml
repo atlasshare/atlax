@@ -1,0 +1,88 @@
+version: 2
+
+builds:
+  - id: atlax-relay
+    main: ./cmd/relay/
+    binary: atlax-relay
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/atlasshare/atlax/internal/config.Version={{.Version}}
+      - -X github.com/atlasshare/atlax/internal/config.Commit={{.Commit}}
+      - -X github.com/atlasshare/atlax/internal/config.Date={{.Date}}
+
+  - id: atlax-agent
+    main: ./cmd/agent/
+    binary: atlax-agent
+    env:
+      - CGO_ENABLED=0
+    goos:
+      - linux
+      - darwin
+    goarch:
+      - amd64
+      - arm64
+    ldflags:
+      - -s -w
+      - -X github.com/atlasshare/atlax/internal/config.Version={{.Version}}
+      - -X github.com/atlasshare/atlax/internal/config.Commit={{.Commit}}
+      - -X github.com/atlasshare/atlax/internal/config.Date={{.Date}}
+
+archives:
+  - id: relay-archive
+    builds:
+      - atlax-relay
+    name_template: "atlax-relay_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: darwin
+        format: zip
+
+  - id: agent-archive
+    builds:
+      - atlax-agent
+    name_template: "atlax-agent_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    format_overrides:
+      - goos: darwin
+        format: zip
+
+checksum:
+  name_template: "checksums.txt"
+  algorithm: sha256
+
+changelog:
+  sort: asc
+  use: github
+  filters:
+    exclude:
+      - "^docs:"
+      - "^chore:"
+      - "^ci:"
+      - "^test:"
+  groups:
+    - title: Features
+      regexp: "^feat"
+      order: 0
+    - title: Bug Fixes
+      regexp: "^fix"
+      order: 1
+    - title: Performance
+      regexp: "^perf"
+      order: 2
+    - title: Refactoring
+      regexp: "^refactor"
+      order: 3
+
+release:
+  github:
+    owner: atlasshare
+    name: atlax
+  draft: false
+  prerelease: auto
+  name_template: "{{.Tag}}"
