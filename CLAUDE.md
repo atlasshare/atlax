@@ -7,7 +7,7 @@ atlax is a custom reverse TLS tunnel with TCP stream multiplexing in Go (Communi
 ## Module
 
 - **Module path:** `github.com/atlasshare/atlax`
-- **Go version:** 1.23 minimum
+- **Go version:** 1.25 minimum
 - **License:** Apache 2.0
 
 ## Architecture

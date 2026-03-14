@@ -8,7 +8,7 @@ This guide walks through setting up a local development environment, building at
 
 | Tool | Minimum Version | Purpose |
 |------|----------------|---------|
-| Go | 1.23+ | Compiling the relay and agent binaries |
+| Go | 1.25+ | Compiling the relay and agent binaries |
 | Docker | 24+ | Running containerized builds and integration tests |
 | make | 3.81+ | Build automation |
 | openssl | 1.1+ | Generating development certificates |
@@ -17,7 +17,7 @@ This guide walks through setting up a local development environment, building at
 ### Verify Prerequisites
 
 ```bash
-go version        # go1.23 or higher
+go version        # go1.25 or higher
 docker --version  # Docker 24 or higher
 make --version    # GNU Make 3.81 or higher
 openssl version   # OpenSSL 1.1 or higher

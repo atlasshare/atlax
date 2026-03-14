@@ -164,7 +164,7 @@ tlsConfig := &tls.Config{
 - Some corporate network inspection tools (TLS-intercepting proxies) may not support TLS 1.3 inspection.
 
 **Mitigations:**
-- atlax requires Go 1.23+, which fully supports TLS 1.3.
+- atlax requires Go 1.25+, which fully supports TLS 1.3.
 - Agents dial out directly to the relay; corporate proxies typically do not intercept outbound TLS to custom ports.
 - Document the TLS 1.3 requirement clearly in deployment prerequisites.
 
