@@ -1,0 +1,49 @@
+[Unit]
+Description=atlax relay server - reverse TLS tunnel with TCP stream multiplexing
+Documentation=https://github.com/atlasshare/atlax
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=atlax
+Group=atlax
+
+ExecStart=/usr/local/bin/atlax-relay --config /etc/atlax/relay.yaml
+Restart=on-failure
+RestartSec=5s
+
+EnvironmentFile=-/etc/atlax/relay.env
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+
+ReadWritePaths=/var/lib/atlax /var/log/atlax
+
+# Allow binding to privileged ports (443, etc.)
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=atlax-relay
+
+[Install]
+WantedBy=multi-user.target

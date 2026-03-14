@@ -1,0 +1,50 @@
+[Unit]
+Description=atlax tunnel agent - reverse TLS tunnel client
+Documentation=https://github.com/atlasshare/atlax
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=atlax
+Group=atlax
+
+ExecStart=/usr/local/bin/atlax-agent --config /etc/atlax/agent.yaml
+Restart=on-failure
+RestartSec=5s
+
+EnvironmentFile=-/etc/atlax/agent.env
+
+WatchdogSec=30s
+
+# Security hardening
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+PrivateDevices=yes
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictSUIDSGID=yes
+RestrictNamespaces=yes
+RestrictRealtime=yes
+MemoryDenyWriteExecute=yes
+LockPersonality=yes
+
+ReadWritePaths=/var/lib/atlax /var/log/atlax
+
+# No privileged ports needed (outbound connections only)
+CapabilityBoundingSet=
+
+# Resource limits
+LimitNOFILE=65536
+LimitNPROC=4096
+
+# Logging
+StandardOutput=journal
+StandardError=journal
+SyslogIdentifier=atlax-agent
+
+[Install]
+WantedBy=multi-user.target
