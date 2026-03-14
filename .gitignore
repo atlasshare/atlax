@@ -1,0 +1,52 @@
+# Go binaries
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+atlax-relay
+atlax-agent
+
+# Test binary, built with `go test -c`
+*.test
+
+# Output of the go coverage tool
+*.out
+*.prof
+
+# Go vendor directory
+vendor/
+
+# Go workspace file
+go.work
+go.work.sum
+
+# Environment files
+.env
+.env.*
+
+# Certificates and keys
+certs/
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+
+# IDE files
+.idea/
+.vscode/
+*.swp
+*.swo
+*~
+
+# OS files
+.DS_Store
+Thumbs.db
+
+# Build output
+bin/
+dist/
+
+# Debug
+__debug_bin*
