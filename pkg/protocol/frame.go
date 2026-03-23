@@ -1,6 +1,9 @@
 package protocol
 
-import "io"
+import (
+	"fmt"
+	"io"
+)
 
 // Protocol-level constants define the wire format boundaries.
 const (
@@ -31,6 +34,35 @@ const (
 	CmdUDPUnbind    Command = 0x0B
 )
 
+// commandNames maps valid commands to their wire protocol names.
+var commandNames = map[Command]string{
+	CmdStreamOpen:   "STREAM_OPEN",
+	CmdStreamData:   "STREAM_DATA",
+	CmdStreamClose:  "STREAM_CLOSE",
+	CmdStreamReset:  "STREAM_RESET",
+	CmdPing:         "PING",
+	CmdPong:         "PONG",
+	CmdWindowUpdate: "WINDOW_UPDATE",
+	CmdGoAway:       "GOAWAY",
+	CmdUDPBind:      "UDP_BIND",
+	CmdUDPData:      "UDP_DATA",
+	CmdUDPUnbind:    "UDP_UNBIND",
+}
+
+// String returns the human-readable name of the command.
+func (c Command) String() string {
+	if name, ok := commandNames[c]; ok {
+		return name
+	}
+	return fmt.Sprintf("UNKNOWN(0x%02x)", byte(c))
+}
+
+// IsValid reports whether c is a defined protocol command.
+func (c Command) IsValid() bool {
+	_, ok := commandNames[c]
+	return ok
+}
+
 // Flag is a bitfield attached to each frame for signaling conditions.
 type Flag byte
 
@@ -38,6 +70,22 @@ const (
 	FlagFIN Flag = 1 << 0
 	FlagACK Flag = 1 << 1
 )
+
+// String returns a human-readable representation of the flag bitfield.
+func (f Flag) String() string {
+	switch f {
+	case 0:
+		return "0x00"
+	case FlagFIN:
+		return "FIN"
+	case FlagACK:
+		return "ACK"
+	case FlagFIN | FlagACK:
+		return "FIN|ACK"
+	default:
+		return fmt.Sprintf("0x%02x", byte(f))
+	}
+}
 
 // Frame represents a single wire protocol frame with its header fields and
 // optional payload.
