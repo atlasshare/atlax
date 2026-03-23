@@ -4,10 +4,12 @@ package protocol
 type StreamState int
 
 const (
-	StateOpen       StreamState = 0
-	StateHalfClosed StreamState = 1
-	StateClosed     StreamState = 2
-	StateReset      StreamState = 3
+	StateIdle             StreamState = 0
+	StateOpen             StreamState = 1
+	StateHalfClosedLocal  StreamState = 2
+	StateHalfClosedRemote StreamState = 3
+	StateClosed           StreamState = 4
+	StateReset            StreamState = 5
 )
 
 // Stream is a bidirectional byte stream multiplexed over a single connection.

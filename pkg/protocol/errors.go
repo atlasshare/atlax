@@ -19,9 +19,11 @@ func (e *Error) Error() string {
 
 // Sentinel errors for common protocol-level failure conditions.
 var (
-	ErrStreamClosed       = errors.New("stream is closed")
-	ErrWindowExhausted    = errors.New("flow-control window exhausted")
-	ErrMaxStreamsExceeded = errors.New("maximum concurrent streams exceeded")
-	ErrInvalidFrame       = errors.New("invalid frame")
-	ErrGoAway             = errors.New("received GOAWAY from peer")
+	ErrStreamClosed        = errors.New("stream is closed")
+	ErrWindowExhausted     = errors.New("flow-control window exhausted")
+	ErrMaxStreamsExceeded  = errors.New("maximum concurrent streams exceeded")
+	ErrInvalidFrame        = errors.New("invalid frame")
+	ErrGoAway              = errors.New("received GOAWAY from peer")
+	ErrZeroWindowIncrement = errors.New("window update increment must be positive")
+	ErrWindowOverflow      = errors.New("window size would exceed maximum (2^31-1)")
 )
