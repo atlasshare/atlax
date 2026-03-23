@@ -2,7 +2,7 @@
 
 **Objective:** Implement the atlax wire protocol multiplexing library in `pkg/protocol/` -- the foundational layer upon which all tunnel communication is built.
 
-**Status:** NOT STARTED
+**Status:** ALL STEPS COMPLETE
 **Target duration:** 2 weeks
 **Estimated sessions:** 3-5 (steps 1-2 serial, steps 3-5 parallelizable, step 6 serial)
 
@@ -613,9 +613,9 @@ All mutations must be recorded in this plan file with timestamp and rationale.
 
 | Step | Status | Commit | Date |
 |------|--------|--------|------|
-| Step 1: Frame Codec | NOT STARTED | -- | -- |
-| Step 2: Flow Control | NOT STARTED | -- | -- |
-| Step 3: Stream State Machine | NOT STARTED | -- | -- |
-| Step 4: UDP Framing | NOT STARTED | -- | -- |
-| Step 5: Mux Session | NOT STARTED | -- | -- |
-| Step 6: Integration & Ship | NOT STARTED | -- | -- |
+| Step 1: Frame Codec | COMPLETED | 4822d7e | 2026-03-23 |
+| Step 2: Flow Control | COMPLETED | 28cbb80 | 2026-03-23 |
+| Step 3: Stream State Machine | COMPLETED | fe0628d | 2026-03-23 |
+| Step 4: UDP Framing | COMPLETED | 5d851f4 | 2026-03-23 |
+| Step 5: Mux Session | COMPLETED | a6d61e0 | 2026-03-23 |
+| Step 6: Integration & Ship | COMPLETED | PR #14 merged | 2026-03-23 |
