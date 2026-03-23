@@ -85,35 +85,32 @@ Evidence:
 - CI pipeline fully operational
 - GitHub repo live at https://github.com/atlasshare/atlax
 
-**Ready to enter Phase 1 (Core Protocol).**
+**Phase 1 (Core Protocol): COMPLETE -- Completed 2026-03-23. Ready to enter Phase 2 (Agent).**
 
 ### Next Step
 
-**Phase 1: Core Protocol** -- Target duration: 2 weeks
+**Phase 2: Agent** -- Target duration: 2 weeks
 
-Implement the wire protocol multiplexing library in `pkg/protocol/`:
+Implement the tunnel agent client in `pkg/agent/`:
 
-1. **Frame encoder/decoder** (frame.go) -- Binary serialization of 12-byte header + payload
-2. **Stream state machine** (stream.go) -- Concrete Stream implementation with state transitions
-3. **Flow control** -- Per-stream (256KB) and connection-level (1MB) window management
-4. **Multiplexer** (mux.go) -- Concrete Muxer with stream ID allocation, ping/pong, GOAWAY
-5. **UDP framing** -- UDP_BIND, UDP_DATA, UDP_UNBIND frame handling
+1. **Agent client** (client.go) -- mTLS connection to relay, session lifecycle
+2. **Tunnel multiplexer** (tunnel.go) -- Stream management, local service forwarding
+3. **Local forwarder** (forwarder.go) -- TCP/UDP proxying to local services
+4. **Service router** -- Match relay requests to local service mappings
+5. **Graceful shutdown** -- GOAWAY handling, connection cleanup
 
 **First files to touch:**
-- `pkg/protocol/frame.go` -- Add concrete FrameReader/FrameWriter implementations
-- `pkg/protocol/stream.go` -- Add concrete Stream implementation
-- `pkg/protocol/mux.go` -- Add concrete Muxer implementation
-- New: `pkg/protocol/frame_codec.go` -- Frame encoding/decoding logic
-- New: `pkg/protocol/stream_impl.go` -- Stream state machine implementation
-- New: `pkg/protocol/mux_session.go` -- Session-level multiplexer
-- New: `pkg/protocol/window.go` -- Flow control window tracking
+- `pkg/agent/client.go` -- Agent struct, relay connection, mTLS setup
+- `pkg/agent/tunnel.go` -- Tunnel session management
+- `pkg/agent/forwarder.go` -- Local service forwarding logic
+- New: `pkg/agent/router.go` -- Service port mapping and routing
+- New: `pkg/agent/shutdown.go` -- Graceful shutdown and GOAWAY handling
 
 **Test files to create:**
-- `pkg/protocol/frame_codec_test.go`
-- `pkg/protocol/stream_impl_test.go`
-- `pkg/protocol/mux_session_test.go`
-- `pkg/protocol/window_test.go`
-- `pkg/protocol/errors_test.go`
+- `pkg/agent/client_test.go`
+- `pkg/agent/tunnel_test.go`
+- `pkg/agent/forwarder_test.go`
+- `pkg/agent/router_test.go`
 
 **Dependencies needed:** Standard library only (encoding/binary, io, sync, context, net, time).
 
