@@ -32,6 +32,7 @@ certs/
 *.crt
 *.csr
 *.p12
+*.srl
 
 # IDE files
 .idea/
