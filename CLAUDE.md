@@ -113,3 +113,10 @@ make lint        # Run golangci-lint
 
 - **No co-author or generated-by lines** in commit messages. No attribution footers of any kind.
 - **No emoji** anywhere in the codebase — code, comments, docs, commit messages, config files. Zero exceptions.
+
+## Issue Reporting
+
+When you discover a bug outside your current domain:
+1. DO NOT fix it or change context
+2. Run: `~/projects/dev-pipeline/scripts/report-issue.sh atlax --severity <critical|high|medium|low> --domain <frontend|backend|infra|data|devops> --title "Short description" --body "Details"`
+3. Continue your current work
