@@ -86,9 +86,14 @@ func NewMuxSession(
 	return m
 }
 
-// OpenStream initiates a new stream to the remote peer. It sends a
-// STREAM_OPEN frame and blocks until the peer responds with ACK.
+// OpenStream initiates a new stream to the remote peer with no payload.
 func (m *MuxSession) OpenStream(ctx context.Context) (Stream, error) {
+	return m.OpenStreamWithPayload(ctx, nil)
+}
+
+// OpenStreamWithPayload initiates a new stream with an optional payload
+// in the STREAM_OPEN frame (e.g., target service name for routing).
+func (m *MuxSession) OpenStreamWithPayload(ctx context.Context, payload []byte) (Stream, error) {
 	if m.goingAway.Load() {
 		return nil, fmt.Errorf("mux: open stream: %w", ErrGoAway)
 	}
@@ -115,11 +120,12 @@ func (m *MuxSession) OpenStream(ctx context.Context) (Stream, error) {
 	m.pendingOpen[id] = ackCh
 	m.pendingMu.Unlock()
 
-	// Send STREAM_OPEN
+	// Send STREAM_OPEN with optional payload
 	m.writeQueue.Enqueue(&Frame{
 		Version:  ProtocolVersion,
 		Command:  CmdStreamOpen,
 		StreamID: id,
+		Payload:  payload,
 	}, PriorityData)
 
 	// Start drain goroutine for this stream
@@ -356,6 +362,9 @@ func (m *MuxSession) handleStreamOpen(f *Frame) {
 	cfg := StreamConfig{InitialWindowSize: m.config.InitialStreamWindow}
 	s := NewStreamSession(f.StreamID, cfg)
 	m.setupStreamClose(s)
+	if len(f.Payload) > 0 {
+		s.SetOpenPayload(f.Payload)
+	}
 	s.Open()
 
 	m.mu.Lock()

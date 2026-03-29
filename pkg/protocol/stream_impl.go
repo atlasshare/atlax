@@ -28,6 +28,10 @@ type StreamSession struct {
 	closedCh  chan struct{}
 	closeOnce sync.Once
 
+	// openPayload stores the STREAM_OPEN frame payload (e.g., target
+	// service name). Set by MuxSession during stream creation.
+	openPayload []byte
+
 	// onLocalClose is called once when Close() transitions the stream to
 	// HalfClosedLocal or Closed. The MuxSession uses this to emit a
 	// STREAM_CLOSE+FIN frame on the wire.
@@ -51,6 +55,12 @@ func NewStreamSession(id uint32, config StreamConfig) *StreamSession {
 
 // ID returns the stream identifier.
 func (s *StreamSession) ID() uint32 { return s.id }
+
+// OpenPayload returns the STREAM_OPEN payload (e.g., target service name).
+func (s *StreamSession) OpenPayload() []byte { return s.openPayload }
+
+// SetOpenPayload stores the STREAM_OPEN payload on this stream.
+func (s *StreamSession) SetOpenPayload(p []byte) { s.openPayload = p }
 
 // State returns the current lifecycle state.
 func (s *StreamSession) State() StreamState {

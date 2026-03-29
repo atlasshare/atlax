@@ -147,19 +147,26 @@ func (t *TunnelRunner) Stats() TunnelStats {
 	}
 }
 
-// resolveTarget maps a stream to a local service address. For now, if
-// there is only one service, all streams go there. Multi-service routing
-// (based on STREAM_OPEN payload) will be added in Phase 3.
-func (t *TunnelRunner) resolveTarget(_ protocol.Stream) string {
-	// Single-service shortcut: if exactly one service is configured,
-	// route all streams there.
+// resolveTarget maps a stream to a local service address by reading
+// the STREAM_OPEN payload for the service name. Falls back to the sole
+// configured service if only one exists.
+func (t *TunnelRunner) resolveTarget(stream protocol.Stream) string {
+	// Try to read service name from STREAM_OPEN payload.
+	if ss, ok := stream.(*protocol.StreamSession); ok {
+		if payload := ss.OpenPayload(); len(payload) > 0 {
+			if addr, found := t.services[string(payload)]; found {
+				return addr
+			}
+		}
+	}
+
+	// Single-service fallback: if exactly one service is configured,
+	// route all streams there regardless of payload.
 	if len(t.services) == 1 {
 		for _, addr := range t.services {
 			return addr
 		}
 	}
-	// Multi-service: would parse stream's STREAM_OPEN payload for
-	// target service name. Not implemented until relay sends service
-	// name in the open payload (Phase 3).
+
 	return ""
 }
