@@ -668,7 +668,16 @@ Write Phase 2 completion report in `docs/development/phase2/phase2-completion-re
 - [ ] **Phase summary:** What Phase 2 delivered, total files added, total test count, overall coverage
 - [ ] **Consolidated issue log:** Aggregate all issues from step reports
 - [ ] **Consolidated decision log:** Aggregate all decisions from step reports
-- [ ] **Open items carried forward:** Features deferred to Phase 3+ (relay-side auth verification, relay-side stream routing, multi-tenant isolation)
+- [ ] **Open items carried forward:** Must include ALL of the following:
+  - **From Phase 1 (deferred through Phase 2):**
+    - Stream ID exhaustion / recycling (deferred to Phase 5)
+    - sync.Pool for Frame objects (deferred to Phase 5)
+    - Fuzz testing for FrameCodec (deferred to security phase)
+  - **From Phase 2 (new for Phase 3):**
+    - Relay-side mTLS verification (relay uses same auth but as server)
+    - Relay-side stream routing (TrafficRouter implementation)
+    - Multi-tenant isolation (AgentRegistry + per-customer stream scoping)
+    - Any new items discovered during Phase 2 implementation
 - [ ] **Architecture snapshot:** Current state of pkg/auth/, pkg/agent/, internal/config/, internal/audit/ -- file list, type list, interface satisfaction map
 - [ ] **Performance baseline:** Benchmark results for new code
 - [ ] **CI verification:** All CI jobs green on main

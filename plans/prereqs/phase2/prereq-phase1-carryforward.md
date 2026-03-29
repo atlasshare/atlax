@@ -47,6 +47,18 @@ Read `docs/development/phase1/phase1-completion-report.md` section "Open Items C
 
 Review each item above. If you disagree with any scoping decision, adjust before starting Phase 2.
 
+**Reviewed and confirmed by Ruben on 2026-03-28.** All scope decisions accepted. Deferred items must be carried forward in the Phase 2 completion report.
+
+## Deferred Items Tracker
+
+These items MUST appear in `docs/development/phase2/phase2-completion-report.md` under "Open Items Carried Forward" and be referenced in subsequent phase plans:
+
+| # | Item | Deferred To | Rationale |
+|---|------|-------------|-----------|
+| 4 | Stream ID exhaustion / recycling | Phase 5 (production hardening) | ~24 days before overflow at max load; acceptable pre-production |
+| 5 | sync.Pool for Frame objects | Phase 5 (production hardening) | Optimize after load testing confirms allocation pressure |
+| 6 | Fuzz testing for FrameCodec | Dedicated security phase | Security-specific testing, not blocking functionality |
+
 ## Done When
 
 - All 7 items reviewed and scope confirmed
