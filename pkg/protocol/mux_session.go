@@ -105,6 +105,7 @@ func (m *MuxSession) OpenStream(ctx context.Context) (Stream, error) {
 	s := NewStreamSession(id, StreamConfig{
 		InitialWindowSize: m.config.InitialStreamWindow,
 	})
+	m.setupStreamClose(s)
 	m.streams[id] = s
 	m.mu.Unlock()
 
@@ -354,6 +355,7 @@ func (m *MuxSession) handleStreamOpen(f *Frame) {
 	// Remote peer is opening a new stream.
 	cfg := StreamConfig{InitialWindowSize: m.config.InitialStreamWindow}
 	s := NewStreamSession(f.StreamID, cfg)
+	m.setupStreamClose(s)
 	s.Open()
 
 	m.mu.Lock()
@@ -499,6 +501,21 @@ func (m *MuxSession) removeStream(id uint32) {
 		delete(m.streams, id)
 	}
 	m.mu.Unlock()
+}
+
+// setupStreamClose registers the onLocalClose callback so that
+// Stream.Close() emits a STREAM_CLOSE+FIN frame on the wire and
+// cleans up the stream if fully closed.
+func (m *MuxSession) setupStreamClose(s *StreamSession) {
+	s.SetOnLocalClose(func(streamID uint32) {
+		m.writeQueue.Enqueue(&Frame{
+			Version:  ProtocolVersion,
+			Command:  CmdStreamClose,
+			Flags:    FlagFIN,
+			StreamID: streamID,
+		}, PriorityData)
+		m.maybeRemoveStream(streamID, s)
+	})
 }
 
 // cleanupPendingOpen removes a pending open channel by stream ID.
