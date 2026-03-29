@@ -53,6 +53,12 @@ func (l *FileLoader) LoadRelayConfig(path string) (*RelayConfig, error) {
 		return nil, fmt.Errorf("config: parse %s: %w", path, err)
 	}
 
+	l.applyRelayEnvOverrides(&cfg)
+
+	if err := l.validateRelayConfig(&cfg); err != nil {
+		return nil, fmt.Errorf("config: validate: %w", err)
+	}
+
 	return &cfg, nil
 }
 
@@ -91,6 +97,89 @@ func (l *FileLoader) validateAgentConfig(cfg *AgentConfig) error {
 		return fmt.Errorf("tls.ca_file is required")
 	}
 	return nil
+}
+
+// applyRelayEnvOverrides applies environment variable overrides to the
+// relay config.
+func (l *FileLoader) applyRelayEnvOverrides(cfg *RelayConfig) {
+	if v := os.Getenv("ATLAX_LISTEN_ADDR"); v != "" {
+		cfg.Server.ListenAddr = v
+	}
+	if v := os.Getenv("ATLAX_AGENT_LISTEN_ADDR"); v != "" {
+		cfg.Server.AgentListenAddr = v
+	}
+	if v := os.Getenv("ATLAX_TLS_CERT"); v != "" {
+		cfg.TLS.CertFile = v
+	}
+	if v := os.Getenv("ATLAX_TLS_KEY"); v != "" {
+		cfg.TLS.KeyFile = v
+	}
+	if v := os.Getenv("ATLAX_TLS_CA"); v != "" {
+		cfg.TLS.CAFile = v
+	}
+	if v := os.Getenv("ATLAX_TLS_CLIENT_CA"); v != "" {
+		cfg.TLS.ClientCAFile = v
+	}
+	if v := os.Getenv("ATLAX_LOG_LEVEL"); v != "" {
+		cfg.Logging.Level = v
+	}
+}
+
+// validateRelayConfig checks that required fields are present.
+func (l *FileLoader) validateRelayConfig(cfg *RelayConfig) error {
+	if cfg.Server.ListenAddr == "" {
+		return fmt.Errorf("server.listen_addr is required")
+	}
+	if cfg.TLS.CertFile == "" {
+		return fmt.Errorf("tls.cert_file is required")
+	}
+	if cfg.TLS.KeyFile == "" {
+		return fmt.Errorf("tls.key_file is required")
+	}
+	if cfg.TLS.ClientCAFile == "" {
+		return fmt.Errorf("tls.client_ca_file is required")
+	}
+	if len(cfg.Customers) == 0 {
+		return fmt.Errorf("at least one customer must be configured")
+	}
+	for i, c := range cfg.Customers {
+		if c.ID == "" {
+			return fmt.Errorf("customers[%d].id is required", i)
+		}
+	}
+	return nil
+}
+
+// PortIndex is a mapping from relay-side port to customer ID and service
+// name, built from the relay configuration.
+type PortIndex struct {
+	Entries map[int]PortIndexEntry
+}
+
+// PortIndexEntry holds the customer and service for a single port.
+type PortIndexEntry struct {
+	CustomerID string
+	Service    string
+}
+
+// BuildPortIndex creates a port-to-customer-service index from the relay
+// config. Returns an error if any port is assigned to multiple customers.
+func BuildPortIndex(customers []CustomerConfig) (*PortIndex, error) {
+	idx := &PortIndex{Entries: make(map[int]PortIndexEntry)}
+	for _, c := range customers {
+		for _, p := range c.Ports {
+			if existing, ok := idx.Entries[p.Port]; ok {
+				return nil, fmt.Errorf(
+					"port %d assigned to both %s and %s",
+					p.Port, existing.CustomerID, c.ID)
+			}
+			idx.Entries[p.Port] = PortIndexEntry{
+				CustomerID: c.ID,
+				Service:    p.Service,
+			}
+		}
+	}
+	return idx, nil
 }
 
 // DefaultAgentConfig returns an AgentConfig with sensible defaults
