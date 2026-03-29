@@ -1,0 +1,8 @@
+project: atlax
+profile: code
+deploy_path: ""
+docker_compose: docker-compose.yml
+ports:
+  relay:
+smoke_url: ""
+known_issues: []
