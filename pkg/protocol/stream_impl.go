@@ -27,6 +27,12 @@ type StreamSession struct {
 	// closedCh is closed when the stream reaches Closed or Reset state.
 	closedCh  chan struct{}
 	closeOnce sync.Once
+
+	// onLocalClose is called once when Close() transitions the stream to
+	// HalfClosedLocal or Closed. The MuxSession uses this to emit a
+	// STREAM_CLOSE+FIN frame on the wire.
+	onLocalClose   func(uint32)
+	localCloseOnce sync.Once
 }
 
 // NewStreamSession creates a stream in the Idle state.
@@ -102,23 +108,42 @@ func (s *StreamSession) WriteOut() <-chan []byte {
 	return s.writeOut
 }
 
+// SetOnLocalClose registers a callback invoked once when the stream is
+// closed locally. Called by MuxSession during stream registration.
+func (s *StreamSession) SetOnLocalClose(fn func(uint32)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onLocalClose = fn
+}
+
 // Close initiates a graceful local close (sends FIN). Transitions from
 // Open to HalfClosedLocal, or from HalfClosedRemote to Closed.
 func (s *StreamSession) Close() error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	shouldNotify := false
 
 	switch s.state {
 	case StateOpen:
 		s.state = StateHalfClosedLocal
+		shouldNotify = true
 	case StateHalfClosedRemote:
 		s.state = StateClosed
+		shouldNotify = true
 		s.signalClosed()
 		s.cond.Broadcast()
 	case StateHalfClosedLocal, StateClosed:
 		// Already closing or closed -- idempotent
 	default:
 		// Idle or Reset -- no-op
+	}
+	s.mu.Unlock()
+
+	if shouldNotify {
+		s.localCloseOnce.Do(func() {
+			if s.onLocalClose != nil {
+				s.onLocalClose(s.id)
+			}
+		})
 	}
 	return nil
 }

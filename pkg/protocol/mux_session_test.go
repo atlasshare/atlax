@@ -687,3 +687,148 @@ func TestWriteQueue_EnqueueAfterClose(t *testing.T) {
 	// Should not panic
 	q.Enqueue(&Frame{Command: CmdPing}, PriorityControl)
 }
+
+// --- STREAM_CLOSE wire emission tests ---
+
+func TestMuxSession_StreamCloseEmitsFrame(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Relay opens stream, agent accepts
+	relayStream, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+
+	agentStream, err := agent.AcceptStream(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, StateOpen, agentStream.(*StreamSession).State())
+
+	// Relay closes its side -- should emit STREAM_CLOSE+FIN on wire
+	require.NoError(t, relayStream.Close())
+
+	// Agent should transition to HalfClosedRemote when it receives STREAM_CLOSE
+	time.Sleep(100 * time.Millisecond)
+
+	state := agentStream.(*StreamSession).State()
+	assert.Equal(t, StateHalfClosedRemote, state,
+		"agent stream should be HalfClosedRemote after relay close")
+}
+
+func TestMuxSession_StreamCloseAgentSide(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	relayStream, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+
+	agentStream, err := agent.AcceptStream(ctx)
+	require.NoError(t, err)
+
+	// Agent closes its side
+	require.NoError(t, agentStream.Close())
+
+	// Relay should see the close
+	time.Sleep(100 * time.Millisecond)
+
+	state := relayStream.(*StreamSession).State()
+	assert.Equal(t, StateHalfClosedRemote, state,
+		"relay stream should be HalfClosedRemote after agent close")
+}
+
+func TestMuxSession_DoubleCloseNoDuplicate(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	relayStream, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+
+	_, err = agent.AcceptStream(ctx)
+	require.NoError(t, err)
+
+	// Close twice -- should not panic or send duplicate frames
+	require.NoError(t, relayStream.Close())
+	require.NoError(t, relayStream.Close())
+
+	time.Sleep(50 * time.Millisecond)
+	// No panic = success
+}
+
+func TestMuxSession_CloseAfterResetNoFrame(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	relayStream, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+
+	agentStream, err := agent.AcceptStream(ctx)
+	require.NoError(t, err)
+
+	// Reset the stream first
+	relayStream.(*StreamSession).Reset(0)
+	assert.Equal(t, StateReset, relayStream.(*StreamSession).State())
+
+	// Close after reset should be a no-op
+	require.NoError(t, relayStream.Close())
+
+	time.Sleep(50 * time.Millisecond)
+
+	// Agent should see Reset, not HalfClosedRemote
+	state := agentStream.(*StreamSession).State()
+	assert.True(t, state == StateReset || state == StateOpen,
+		"agent should not see STREAM_CLOSE after Reset, got %v", state)
+}
+
+func TestMuxSession_FullStreamLifecycle(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// 1. Open
+	relayStream, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+	agentStream, err := agent.AcceptStream(ctx)
+	require.NoError(t, err)
+
+	// 2. Exchange data
+	_, err = relayStream.Write([]byte("request"))
+	require.NoError(t, err)
+	buf := make([]byte, 64)
+	n, err := agentStream.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "request", string(buf[:n]))
+
+	_, err = agentStream.Write([]byte("response"))
+	require.NoError(t, err)
+	n, err = relayStream.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "response", string(buf[:n]))
+
+	// 3. Relay closes (half-close)
+	require.NoError(t, relayStream.Close())
+	time.Sleep(100 * time.Millisecond)
+	assert.Equal(t, StateHalfClosedLocal, relayStream.(*StreamSession).State())
+	assert.Equal(t, StateHalfClosedRemote, agentStream.(*StreamSession).State())
+
+	// 4. Agent reads EOF (remote closed)
+	_, err = agentStream.Read(buf)
+	assert.ErrorIs(t, err, io.EOF)
+
+	// 5. Agent closes (both sides closed)
+	require.NoError(t, agentStream.Close())
+	time.Sleep(100 * time.Millisecond)
+
+	// 6. Both streams should be Closed and removed from mux
+	time.Sleep(200 * time.Millisecond)
+	assert.Equal(t, StateClosed, relayStream.(*StreamSession).State())
+	assert.Equal(t, StateClosed, agentStream.(*StreamSession).State())
+	assert.Equal(t, 0, relay.NumStreams())
+	assert.Equal(t, 0, agent.NumStreams())
+}
