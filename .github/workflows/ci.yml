@@ -44,6 +44,9 @@ jobs:
           go-version-file: go.mod
           cache: true
 
+      - name: Generate dev certificates
+        run: make certs-dev
+
       - name: Run tests
         run: go test -race -coverprofile=coverage.out -covermode=atomic ./...
 
