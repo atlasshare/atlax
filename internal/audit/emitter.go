@@ -19,7 +19,8 @@ var ErrEmitterClosed = errors.New("audit: emitter is closed")
 type SlogEmitter struct {
 	logger  *slog.Logger
 	eventCh chan Event
-	done    chan struct{}
+	closeCh chan struct{} // closed to signal Emit to stop sending
+	done    chan struct{} // closed when drainLoop finishes
 	once    sync.Once
 }
 
@@ -36,6 +37,7 @@ func NewSlogEmitter(logger *slog.Logger, bufferSize int) *SlogEmitter {
 	e := &SlogEmitter{
 		logger:  logger,
 		eventCh: make(chan Event, bufferSize),
+		closeCh: make(chan struct{}),
 		done:    make(chan struct{}),
 	}
 	go e.drainLoop()
@@ -48,9 +50,15 @@ func NewSlogEmitter(logger *slog.Logger, bufferSize int) *SlogEmitter {
 //nolint:gocritic // Event is immutable value type; interface requires value semantics
 func (e *SlogEmitter) Emit(_ context.Context, event Event) error {
 	select {
+	case <-e.closeCh:
+		return fmt.Errorf("audit: emit %s: %w", event.Action, ErrEmitterClosed)
+	default:
+	}
+
+	select {
 	case e.eventCh <- event:
 		return nil
-	case <-e.done:
+	case <-e.closeCh:
 		return fmt.Errorf("audit: emit %s: %w", event.Action, ErrEmitterClosed)
 	}
 }
@@ -59,8 +67,9 @@ func (e *SlogEmitter) Emit(_ context.Context, event Event) error {
 // idempotent.
 func (e *SlogEmitter) Close() error {
 	e.once.Do(func() {
-		close(e.eventCh)
-		<-e.done // wait for drain to finish
+		close(e.closeCh) // signal Emit to stop sending
+		close(e.eventCh) // signal drainLoop to finish
+		<-e.done         // wait for drain to flush
 	})
 	return nil
 }
@@ -74,7 +83,9 @@ func (e *SlogEmitter) drainLoop() {
 }
 
 // logEvent writes a single event as structured slog attributes.
-func (e *SlogEmitter) logEvent(event Event) { //nolint:gocritic // called from drainLoop with channel-received value
+//
+//nolint:gocritic // called from drainLoop with channel-received value
+func (e *SlogEmitter) logEvent(event Event) {
 	attrs := []slog.Attr{
 		slog.String("action", string(event.Action)),
 		slog.String("actor", event.Actor),
