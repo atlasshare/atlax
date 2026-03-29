@@ -2,7 +2,7 @@
 
 **Objective:** Implement the atlax tunnel agent (`atlax-agent` binary) that connects to a relay over mTLS, receives stream requests, and forwards traffic to local services. This phase also completes the Phase 1 protocol gaps (STREAM_OPEN handshake, write draining, flow window integration) that are required for real traffic to flow.
 
-**Status:** NOT STARTED
+**Status:** ALL STEPS COMPLETE
 **Target duration:** 3 weeks
 **Estimated sessions:** 5-8 (steps 1-2 serial, steps 3-4 parallelizable, steps 5-6 serial)
 
@@ -748,8 +748,8 @@ All mutations must be recorded in this plan file with timestamp and rationale.
 | Step 2: Agent Client | COMPLETED | #19 | f50a008 | 2026-03-29 |
 | Step 3: Service Forwarder | COMPLETED | #20 | 76d0b0b | 2026-03-29 |
 | Step 4: Audit Emitter | COMPLETED | #21 | 8c73300 | 2026-03-29 |
-| Step 5: Config + Tunnel + Binary | IN PROGRESS | #22 | bf7c627 | 2026-03-29 |
-| Step 6: Integration & Ship | NOT STARTED | -- | -- | -- |
+| Step 5: Config + Tunnel + Binary | COMPLETED | #22 | 0d0227f | 2026-03-29 |
+| Step 6: Integration & Ship | COMPLETED | -- | main | 2026-03-29 |
 
 ---
 
