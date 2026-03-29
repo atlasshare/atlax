@@ -4,83 +4,86 @@ import "time"
 
 // RelayConfig is the top-level configuration for the atlax-relay binary.
 type RelayConfig struct {
-	Server    ServerConfig
-	TLS       TLSPaths
-	Customers []CustomerConfig
-	Logging   LogConfig
-	Metrics   MetricsConfig
+	Server    ServerConfig     `yaml:"server"`
+	TLS       TLSPaths         `yaml:"tls"`
+	Customers []CustomerConfig `yaml:"customers"`
+	Logging   LogConfig        `yaml:"logging"`
+	Metrics   MetricsConfig    `yaml:"metrics"`
 }
 
 // AgentConfig is the top-level configuration for the atlax-agent binary.
 type AgentConfig struct {
-	Relay    RelayConnection
-	TLS      TLSPaths
-	Services []ServiceMapping
-	Logging  LogConfig
-	Update   UpdateConfig
+	Relay    RelayConnection  `yaml:"relay"`
+	TLS      TLSPaths         `yaml:"tls"`
+	Services []ServiceMapping `yaml:"services"`
+	Logging  LogConfig        `yaml:"logging"`
+	Update   UpdateConfig     `yaml:"update"`
 }
 
 // ServerConfig holds network listener and limit settings for the relay.
 type ServerConfig struct {
-	ListenAddr          string
-	AgentListenAddr     string
-	MaxAgents           int
-	MaxStreamsPerAgent  int
-	IdleTimeout         time.Duration
-	ShutdownGracePeriod time.Duration
+	ListenAddr          string        `yaml:"listen_addr"`
+	AgentListenAddr     string        `yaml:"agent_listen_addr"`
+	MaxAgents           int           `yaml:"max_agents"`
+	MaxStreamsPerAgent  int           `yaml:"max_streams_per_agent"`
+	IdleTimeout         time.Duration `yaml:"idle_timeout"`
+	ShutdownGracePeriod time.Duration `yaml:"shutdown_grace_period"`
 }
 
 // TLSPaths points to the PEM files needed for mTLS.
 type TLSPaths struct {
-	CertFile     string
-	KeyFile      string
-	CAFile       string
-	ClientCAFile string
+	CertFile     string `yaml:"cert_file"`
+	KeyFile      string `yaml:"key_file"`
+	CAFile       string `yaml:"ca_file"`
+	ClientCAFile string `yaml:"client_ca_file"`
 }
 
 // CustomerConfig defines per-customer resource limits and port allowances.
 type CustomerConfig struct {
-	CustomerID       string
-	AllowedPorts     []int
-	MaxStreams       int
-	MaxBandwidthMbps int
+	CustomerID       string `yaml:"customer_id"`
+	AllowedPorts     []int  `yaml:"allowed_ports"`
+	MaxStreams       int    `yaml:"max_streams"`
+	MaxBandwidthMbps int    `yaml:"max_bandwidth_mbps"`
 }
 
 // RelayConnection holds the agent-side settings for connecting to a relay.
 type RelayConnection struct {
-	Addr       string
-	ServerName string
-	// InsecureSkipVerify disables TLS verification. For development use only.
-	InsecureSkipVerify bool
+	Addr                string        `yaml:"addr"`
+	ServerName          string        `yaml:"server_name"`
+	InsecureSkipVerify  bool          `yaml:"insecure_skip_verify"`
+	ReconnectInterval   time.Duration `yaml:"reconnect_interval"`
+	MaxReconnectBackoff time.Duration `yaml:"reconnect_max_backoff"`
+	KeepaliveInterval   time.Duration `yaml:"keepalive_interval"`
+	KeepaliveTimeout    time.Duration `yaml:"keepalive_timeout"`
 }
 
 // LogConfig controls structured logging output.
 type LogConfig struct {
-	Level  string
-	Format string
-	Output string
+	Level  string `yaml:"level"`
+	Format string `yaml:"format"`
+	Output string `yaml:"output"`
 }
 
 // MetricsConfig controls the optional metrics exporter.
 type MetricsConfig struct {
-	Enabled    bool
-	ListenAddr string
+	Enabled    bool   `yaml:"enabled"`
+	ListenAddr string `yaml:"listen_addr"`
 }
 
 // UpdateConfig controls the agent's automatic update checker.
 type UpdateConfig struct {
-	Enabled       bool
-	CheckInterval time.Duration
-	ManifestURL   string
-	PublicKeyPath string
+	Enabled       bool          `yaml:"enabled"`
+	CheckInterval time.Duration `yaml:"check_interval"`
+	ManifestURL   string        `yaml:"manifest_url"`
+	PublicKeyPath string        `yaml:"public_key_path"`
 }
 
 // ServiceMapping binds a local network address to a relay-side port.
 type ServiceMapping struct {
-	Name      string
-	Protocol  string
-	LocalAddr string
-	RelayPort int
+	Name      string `yaml:"name"`
+	Protocol  string `yaml:"protocol"`
+	LocalAddr string `yaml:"local_addr"`
+	RelayPort int    `yaml:"relay_port"`
 }
 
 // Loader supports YAML config files and environment variable overrides.
