@@ -329,11 +329,10 @@ func TestClient_HeartbeatDetectsDeadConnection(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
-	var remoteConn net.Conn
 	go func() {
-		remoteConn = dialer.accept(t)
+		remote := dialer.accept(t)
 		// Start relay briefly then kill it
-		relay := relaySimulator(t, remoteConn)
+		relay := relaySimulator(t, remote)
 		time.Sleep(20 * time.Millisecond)
 		relay.Close()
 	}()
@@ -342,10 +341,6 @@ func TestClient_HeartbeatDetectsDeadConnection(t *testing.T) {
 
 	// Wait for heartbeat to detect the dead connection
 	time.Sleep(200 * time.Millisecond)
-
-	// Heartbeat goroutine should have exited; the client detects
-	// the failure but does not auto-reconnect (that is the caller's job).
-	_ = remoteConn
 }
 
 func TestClient_Mux(t *testing.T) {
