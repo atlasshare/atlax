@@ -271,6 +271,22 @@ func TestStreamSession_ConcurrentReadWrite(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
 	defer cancel()
 
+	// Drain goroutine (simulates MuxSession.drainStream)
+	wg.Add(1)
+	go func() {
+		defer wg.Done()
+		for {
+			select {
+			case _, ok := <-s.WriteOut():
+				if !ok {
+					return
+				}
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
 	// Writer goroutine
 	wg.Add(1)
 	go func() {

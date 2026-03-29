@@ -10,15 +10,16 @@ import (
 // CertificateStore abstracts loading, caching, and live-rotation of TLS
 // certificates and CA bundles.
 type CertificateStore interface {
-	// LoadCertificate reads a PEM-encoded certificate and key pair.
-	LoadCertificate(path string) (tls.Certificate, error)
+	// LoadCertificate reads a PEM-encoded certificate and key pair from
+	// the given cert and key file paths.
+	LoadCertificate(certPath, keyPath string) (tls.Certificate, error)
 
 	// LoadCertificateAuthority reads one or more PEM-encoded CA certificates
 	// into a pool suitable for peer verification.
 	LoadCertificateAuthority(path string) (*x509.CertPool, error)
 
 	// WatchForRotation monitors the given cert and key paths and calls reload
-	// whenever the files change on disk.
+	// whenever the files change on disk. Blocks until ctx is canceled.
 	WatchForRotation(ctx context.Context, certPath string, keyPath string, reload func(tls.Certificate)) error
 }
 
