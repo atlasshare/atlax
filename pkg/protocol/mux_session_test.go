@@ -2,6 +2,7 @@ package protocol
 
 import (
 	"context"
+	"encoding/binary"
 	"io"
 	"net"
 	"sync"
@@ -283,18 +284,24 @@ func TestMuxSession_BidirectionalData(t *testing.T) {
 	agentStream, err := agent.AcceptStream(ctx)
 	require.NoError(t, err)
 
-	// Relay writes, agent reads
-	_, err = relayStream.Write([]byte("hello from relay"))
+	// Relay writes, agent reads via drain loop
+	msg := []byte("hello from relay")
+	_, err = relayStream.Write(msg)
 	require.NoError(t, err)
 
-	// Give data time to transit
-	time.Sleep(100 * time.Millisecond)
+	buf := make([]byte, 64)
+	n, err := agentStream.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, string(msg), string(buf[:n]))
 
-	// The mux does not yet wire Write->transport->Deliver automatically
-	// (that requires the write loop to encode STREAM_DATA from writeBuf).
-	// For this test, verify streams are open and writable.
-	assert.Equal(t, StateOpen, relayStream.(*StreamSession).State())
-	assert.Equal(t, StateOpen, agentStream.(*StreamSession).State())
+	// Agent writes back, relay reads
+	reply := []byte("hello from agent")
+	_, err = agentStream.Write(reply)
+	require.NoError(t, err)
+
+	n, err = relayStream.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, string(reply), string(buf[:n]))
 }
 
 func TestMuxSession_ConcurrentOpenStream(t *testing.T) {
@@ -485,16 +492,15 @@ func TestMuxSession_HandleStreamReset(t *testing.T) {
 	assert.Equal(t, StateReset, ss.State())
 }
 
-func TestMuxSession_HandleWindowUpdate(t *testing.T) {
-	relay, _ := newMuxPair(t)
+func TestMuxSession_HandleWindowUpdate_ConnectionLevel(t *testing.T) {
+	relay, agent := newMuxPair(t)
 
-	// Send a WINDOW_UPDATE frame (connection level)
+	// Record initial connection window on agent side
+	initialWindow := agent.connSendWindow.Available()
+
+	// Send WINDOW_UPDATE (connection level, stream ID 0) from relay to agent
 	payload := make([]byte, 4)
-	// Window increment: 65536 (big-endian)
-	payload[0] = 0x00
-	payload[1] = 0x01
-	payload[2] = 0x00
-	payload[3] = 0x00
+	binary.BigEndian.PutUint32(payload, 65536)
 
 	relay.writeQueue.Enqueue(&Frame{
 		Version:  ProtocolVersion,
@@ -503,8 +509,59 @@ func TestMuxSession_HandleWindowUpdate(t *testing.T) {
 		Payload:  payload,
 	}, PriorityControl)
 
-	// Just verify no crash -- actual window tracking is future work
+	// Wait for frame to arrive
+	time.Sleep(100 * time.Millisecond)
+
+	// Agent's connection send window should have increased
+	assert.Equal(t, initialWindow+65536, agent.connSendWindow.Available())
+}
+
+func TestMuxSession_HandleWindowUpdate_StreamLevel(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	_, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+
+	agentStream, err := agent.AcceptStream(ctx)
+	require.NoError(t, err)
+
+	initialWindow := agentStream.ReceiveWindow()
+
+	// Send WINDOW_UPDATE for this stream from relay to agent
+	payload := make([]byte, 4)
+	binary.BigEndian.PutUint32(payload, 32768)
+
+	relay.writeQueue.Enqueue(&Frame{
+		Version:  ProtocolVersion,
+		Command:  CmdWindowUpdate,
+		StreamID: agentStream.ID(),
+		Payload:  payload,
+	}, PriorityData)
+
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, initialWindow+32768, agentStream.ReceiveWindow())
+}
+
+func TestMuxSession_HandleWindowUpdate_InvalidStreamID(t *testing.T) {
+	relay, _ := newMuxPair(t)
+
+	// Send WINDOW_UPDATE for nonexistent stream -- should not panic
+	payload := make([]byte, 4)
+	binary.BigEndian.PutUint32(payload, 1024)
+
+	relay.writeQueue.Enqueue(&Frame{
+		Version:  ProtocolVersion,
+		Command:  CmdWindowUpdate,
+		StreamID: 99999,
+		Payload:  payload,
+	}, PriorityData)
+
 	time.Sleep(50 * time.Millisecond)
+	// No panic = success
 }
 
 func TestMuxSession_StreamRemovedAfterFullClose(t *testing.T) {

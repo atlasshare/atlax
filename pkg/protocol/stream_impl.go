@@ -18,7 +18,15 @@ type StreamSession struct {
 	state      StreamState
 	readBuf    bytes.Buffer
 	recvWindow int
-	writeBuf   [][]byte // outgoing data frames queued by Write
+
+	// writeOut receives data chunks queued by Write. The MuxSession
+	// drain goroutine reads from this channel and emits STREAM_DATA
+	// frames to the transport.
+	writeOut chan []byte
+
+	// closedCh is closed when the stream reaches Closed or Reset state.
+	closedCh  chan struct{}
+	closeOnce sync.Once
 }
 
 // NewStreamSession creates a stream in the Idle state.
@@ -28,6 +36,8 @@ func NewStreamSession(id uint32, config StreamConfig) *StreamSession {
 		config:     config,
 		state:      StateIdle,
 		recvWindow: config.InitialWindowSize,
+		writeOut:   make(chan []byte, 64),
+		closedCh:   make(chan struct{}),
 	}
 	s.cond = sync.NewCond(&s.mu)
 	return s
@@ -65,19 +75,31 @@ func (s *StreamSession) Read(p []byte) (int, error) {
 	return n, err
 }
 
-// Write queues data for sending. Fails if the local side is closed.
+// Write queues data for sending via the MuxSession drain loop.
+// Fails if the local side is closed.
 func (s *StreamSession) Write(p []byte) (int, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	if s.isWriteClosed() {
+		s.mu.Unlock()
 		return 0, fmt.Errorf("stream %d: write: %w", s.id, ErrStreamClosed)
 	}
+	s.mu.Unlock()
 
 	data := make([]byte, len(p))
 	copy(data, p)
-	s.writeBuf = append(s.writeBuf, data)
-	return len(p), nil
+
+	select {
+	case s.writeOut <- data:
+		return len(p), nil
+	case <-s.closedCh:
+		return 0, fmt.Errorf("stream %d: write: %w", s.id, ErrStreamClosed)
+	}
+}
+
+// WriteOut returns the channel that the MuxSession reads to drain
+// outgoing data into STREAM_DATA frames.
+func (s *StreamSession) WriteOut() <-chan []byte {
+	return s.writeOut
 }
 
 // Close initiates a graceful local close (sends FIN). Transitions from
@@ -91,6 +113,7 @@ func (s *StreamSession) Close() error {
 		s.state = StateHalfClosedLocal
 	case StateHalfClosedRemote:
 		s.state = StateClosed
+		s.signalClosed()
 		s.cond.Broadcast()
 	case StateHalfClosedLocal, StateClosed:
 		// Already closing or closed -- idempotent
@@ -135,6 +158,7 @@ func (s *StreamSession) RemoteClose() {
 		s.state = StateHalfClosedRemote
 	case StateHalfClosedLocal:
 		s.state = StateClosed
+		s.signalClosed()
 	default:
 		// Ignore if already closed/reset
 	}
@@ -147,7 +171,13 @@ func (s *StreamSession) Reset(code uint32) {
 	defer s.mu.Unlock()
 	s.state = StateReset
 	s.readBuf.Reset()
+	s.signalClosed()
 	s.cond.Broadcast()
+}
+
+// signalClosed closes closedCh exactly once. Must be called with mu held.
+func (s *StreamSession) signalClosed() {
+	s.closeOnce.Do(func() { close(s.closedCh) })
 }
 
 // isReadClosed reports whether Read should return EOF.

@@ -39,10 +39,17 @@ type MuxSession struct {
 	goingAway    atomic.Bool
 	writeQueue   *WriteQueue
 
+	// pendingOpen tracks streams waiting for STREAM_OPEN+ACK.
+	pendingMu   sync.Mutex
+	pendingOpen map[uint32]chan struct{}
+
 	// Ping tracking
 	pingMu   sync.Mutex
 	pingCh   chan time.Duration
 	pingData [8]byte
+
+	// Connection-level flow control
+	connSendWindow *FlowWindow
 }
 
 // Compile-time interface check.
@@ -60,16 +67,18 @@ func NewMuxSession(
 	}
 
 	m := &MuxSession{
-		transport:    transport,
-		codec:        NewFrameCodec(),
-		config:       config,
-		role:         role,
-		logger:       slog.Default(),
-		streams:      make(map[uint32]*StreamSession),
-		nextStreamID: startID,
-		acceptCh:     make(chan *StreamSession, config.MaxConcurrentStreams),
-		closeCh:      make(chan struct{}),
-		writeQueue:   NewWriteQueue(),
+		transport:      transport,
+		codec:          NewFrameCodec(),
+		config:         config,
+		role:           role,
+		logger:         slog.Default(),
+		streams:        make(map[uint32]*StreamSession),
+		nextStreamID:   startID,
+		acceptCh:       make(chan *StreamSession, config.MaxConcurrentStreams),
+		closeCh:        make(chan struct{}),
+		writeQueue:     NewWriteQueue(),
+		pendingOpen:    make(map[uint32]chan struct{}),
+		connSendWindow: NewFlowWindow(int32(config.ConnectionWindow)), //nolint:gosec // ConnectionWindow is bounded by config validation
 	}
 
 	go m.readLoop()
@@ -77,7 +86,8 @@ func NewMuxSession(
 	return m
 }
 
-// OpenStream initiates a new stream to the remote peer.
+// OpenStream initiates a new stream to the remote peer. It sends a
+// STREAM_OPEN frame and blocks until the peer responds with ACK.
 func (m *MuxSession) OpenStream(ctx context.Context) (Stream, error) {
 	if m.goingAway.Load() {
 		return nil, fmt.Errorf("mux: open stream: %w", ErrGoAway)
@@ -98,6 +108,12 @@ func (m *MuxSession) OpenStream(ctx context.Context) (Stream, error) {
 	m.streams[id] = s
 	m.mu.Unlock()
 
+	// Register pending open channel for ACK notification.
+	ackCh := make(chan struct{}, 1)
+	m.pendingMu.Lock()
+	m.pendingOpen[id] = ackCh
+	m.pendingMu.Unlock()
+
 	// Send STREAM_OPEN
 	m.writeQueue.Enqueue(&Frame{
 		Version:  ProtocolVersion,
@@ -105,9 +121,22 @@ func (m *MuxSession) OpenStream(ctx context.Context) (Stream, error) {
 		StreamID: id,
 	}, PriorityData)
 
+	// Start drain goroutine for this stream
+	go m.drainStream(s)
+
 	// Wait for ACK
-	s.Open() // Transition to open (simplified: trust peer will ACK)
-	return s, nil
+	select {
+	case <-ackCh:
+		s.Open()
+		return s, nil
+	case <-ctx.Done():
+		m.cleanupPendingOpen(id)
+		m.removeStream(id)
+		return nil, fmt.Errorf("mux: open stream: %w", ctx.Err())
+	case <-m.closeCh:
+		m.cleanupPendingOpen(id)
+		return nil, fmt.Errorf("mux: open stream: %w", ErrGoAway)
+	}
 }
 
 // AcceptStream waits for the remote peer to open a new stream.
@@ -174,7 +203,6 @@ func (m *MuxSession) GoAway(code uint32) error {
 func (m *MuxSession) Ping(ctx context.Context) (time.Duration, error) {
 	m.pingMu.Lock()
 	m.pingCh = make(chan time.Duration, 1)
-	// Use current time as ping data for uniqueness
 	now := time.Now()
 	binary.BigEndian.PutUint64(m.pingData[:], uint64(now.UnixNano()))
 	m.pingMu.Unlock()
@@ -259,6 +287,29 @@ func (m *MuxSession) writeLoop() {
 	}
 }
 
+// drainStream reads from a stream's write output channel and enqueues
+// STREAM_DATA frames into the write queue.
+func (m *MuxSession) drainStream(s *StreamSession) {
+	for {
+		select {
+		case data, ok := <-s.writeOut:
+			if !ok {
+				return
+			}
+			m.writeQueue.Enqueue(&Frame{
+				Version:  ProtocolVersion,
+				Command:  CmdStreamData,
+				StreamID: s.id,
+				Payload:  data,
+			}, PriorityData)
+		case <-s.closedCh:
+			return
+		case <-m.closeCh:
+			return
+		}
+	}
+}
+
 // handleFrame dispatches an incoming frame by command type.
 func (m *MuxSession) handleFrame(f *Frame) {
 	switch f.Command {
@@ -283,10 +334,24 @@ func (m *MuxSession) handleFrame(f *Frame) {
 
 func (m *MuxSession) handleStreamOpen(f *Frame) {
 	if f.Flags&FlagACK != 0 {
-		// ACK for a stream we opened -- already transitioned in OpenStream
+		// ACK for a stream we opened -- notify the pending open.
+		m.pendingMu.Lock()
+		ch, ok := m.pendingOpen[f.StreamID]
+		if ok {
+			delete(m.pendingOpen, f.StreamID)
+		}
+		m.pendingMu.Unlock()
+
+		if ok {
+			select {
+			case ch <- struct{}{}:
+			default:
+			}
+		}
 		return
 	}
 
+	// Remote peer is opening a new stream.
 	cfg := StreamConfig{InitialWindowSize: m.config.InitialStreamWindow}
 	s := NewStreamSession(f.StreamID, cfg)
 	s.Open()
@@ -294,6 +359,9 @@ func (m *MuxSession) handleStreamOpen(f *Frame) {
 	m.mu.Lock()
 	m.streams[f.StreamID] = s
 	m.mu.Unlock()
+
+	// Start drain goroutine for this stream.
+	go m.drainStream(s)
 
 	// Send ACK
 	m.writeQueue.Enqueue(&Frame{
@@ -385,9 +453,29 @@ func (m *MuxSession) handleWindowUpdate(f *Frame) {
 	if len(f.Payload) < 4 {
 		return
 	}
-	// Window update handling will be wired to FlowWindow in a future
-	// integration step. For now, the frame is acknowledged but the
-	// window is not tracked at the mux level.
+
+	increment := int32(binary.BigEndian.Uint32(f.Payload[:4])) //nolint:gosec // protocol field
+
+	if f.StreamID == 0 {
+		// Connection-level window update.
+		if err := m.connSendWindow.Update(increment); err != nil {
+			m.logger.Warn("mux: connection window update failed",
+				"error", err)
+		}
+		return
+	}
+
+	// Stream-level window update.
+	m.mu.Lock()
+	s, ok := m.streams[f.StreamID]
+	m.mu.Unlock()
+	if !ok {
+		return
+	}
+
+	s.mu.Lock()
+	s.recvWindow += int(increment)
+	s.mu.Unlock()
 }
 
 func (m *MuxSession) handleGoAway(_ *Frame) {
@@ -401,4 +489,21 @@ func (m *MuxSession) maybeRemoveStream(id uint32, s *StreamSession) {
 		delete(m.streams, id)
 		m.mu.Unlock()
 	}
+}
+
+// removeStream removes a stream by ID (used for cleanup on failed open).
+func (m *MuxSession) removeStream(id uint32) {
+	m.mu.Lock()
+	if s, ok := m.streams[id]; ok {
+		s.Reset(0)
+		delete(m.streams, id)
+	}
+	m.mu.Unlock()
+}
+
+// cleanupPendingOpen removes a pending open channel by stream ID.
+func (m *MuxSession) cleanupPendingOpen(id uint32) {
+	m.pendingMu.Lock()
+	delete(m.pendingOpen, id)
+	m.pendingMu.Unlock()
 }
