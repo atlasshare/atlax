@@ -5,7 +5,7 @@ These are tasks that must be completed by the user (not the agent) before Phase 
 ## Checklist
 
 - [x] **Dev certificates verified** -- Confirm certs/ directory exists with valid CA chain from Phase 1 prereq (`prereq-verify-certs.md`)
-- [ ] **YAML config dependency** -- Add `gopkg.in/yaml.v3` to go.mod for agent configuration loading (`prereq-yaml-dep.md`)
-- [ ] **Phase 1 open items acknowledged** -- Review carried-forward items and confirm scope for Phase 2 (`prereq-phase1-carryforward.md`)
+- [x] **YAML config dependency** -- Add `gopkg.in/yaml.v3` to go.mod for agent configuration loading (`prereq-yaml-dep.md`)
+- [x] **Phase 1 open items acknowledged** -- Review carried-forward items and confirm scope for Phase 2 (`prereq-phase1-carryforward.md`)
 
 Complete all items before starting Phase 2 Step 1.
