@@ -185,20 +185,167 @@ func TestDefaultAgentConfig(t *testing.T) {
 	assert.Equal(t, "json", cfg.Logging.Format)
 }
 
-func TestLoadRelayConfig_Valid(t *testing.T) {
-	yaml := `
+const validRelayYAML = `
 server:
   listen_addr: ":8443"
+  admin_addr: ":9090"
   agent_listen_addr: ":8444"
+  max_agents: 1000
+  max_streams_per_agent: 100
+  idle_timeout: 300s
+  shutdown_grace_period: 30s
 tls:
   cert_file: /relay.crt
   key_file: /relay.key
+  ca_file: /root-ca.crt
   client_ca_file: /customer-ca.crt
+customers:
+  - id: "customer-dev-001"
+    ports:
+      - port: 8080
+        service: "http"
+        description: "HTTP web service"
+      - port: 8081
+        service: "smb"
+        description: "SMB file sharing"
+logging:
+  level: info
+  format: json
 `
-	path := writeConfig(t, yaml)
+
+func TestLoadRelayConfig_Valid(t *testing.T) {
+	path := writeConfig(t, validRelayYAML)
 	loader := NewFileLoader()
 	cfg, err := loader.LoadRelayConfig(path)
 	require.NoError(t, err)
 	assert.Equal(t, ":8443", cfg.Server.ListenAddr)
+	assert.Equal(t, ":9090", cfg.Server.AdminAddr)
 	assert.Equal(t, "/relay.crt", cfg.TLS.CertFile)
+	assert.Equal(t, "/customer-ca.crt", cfg.TLS.ClientCAFile)
+	require.Len(t, cfg.Customers, 1)
+	assert.Equal(t, "customer-dev-001", cfg.Customers[0].ID)
+	require.Len(t, cfg.Customers[0].Ports, 2)
+	assert.Equal(t, 8080, cfg.Customers[0].Ports[0].Port)
+	assert.Equal(t, "http", cfg.Customers[0].Ports[0].Service)
+}
+
+func TestLoadRelayConfig_MissingListenAddr(t *testing.T) {
+	yml := `
+tls:
+  cert_file: /cert
+  key_file: /key
+  client_ca_file: /ca
+customers:
+  - id: "c1"
+`
+	path := writeConfig(t, yml)
+	loader := NewFileLoader()
+	_, err := loader.LoadRelayConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "server.listen_addr is required")
+}
+
+func TestLoadRelayConfig_MissingClientCA(t *testing.T) {
+	yml := `
+server:
+  listen_addr: ":8443"
+tls:
+  cert_file: /cert
+  key_file: /key
+customers:
+  - id: "c1"
+`
+	path := writeConfig(t, yml)
+	loader := NewFileLoader()
+	_, err := loader.LoadRelayConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "tls.client_ca_file is required")
+}
+
+func TestLoadRelayConfig_NoCustomers(t *testing.T) {
+	yml := `
+server:
+  listen_addr: ":8443"
+tls:
+  cert_file: /cert
+  key_file: /key
+  client_ca_file: /ca
+customers: []
+`
+	path := writeConfig(t, yml)
+	loader := NewFileLoader()
+	_, err := loader.LoadRelayConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "at least one customer")
+}
+
+func TestLoadRelayConfig_CustomerMissingID(t *testing.T) {
+	yml := `
+server:
+  listen_addr: ":8443"
+tls:
+  cert_file: /cert
+  key_file: /key
+  client_ca_file: /ca
+customers:
+  - ports:
+      - port: 8080
+        service: "http"
+`
+	path := writeConfig(t, yml)
+	loader := NewFileLoader()
+	_, err := loader.LoadRelayConfig(path)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "customers[0].id is required")
+}
+
+func TestLoadRelayConfig_EnvOverrides(t *testing.T) {
+	path := writeConfig(t, validRelayYAML)
+
+	t.Setenv("ATLAX_LISTEN_ADDR", ":9443")
+	t.Setenv("ATLAX_TLS_CLIENT_CA", "/override/ca.crt")
+	t.Setenv("ATLAX_LOG_LEVEL", "debug")
+
+	loader := NewFileLoader()
+	cfg, err := loader.LoadRelayConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, ":9443", cfg.Server.ListenAddr)
+	assert.Equal(t, "/override/ca.crt", cfg.TLS.ClientCAFile)
+	assert.Equal(t, "debug", cfg.Logging.Level)
+}
+
+func TestBuildPortIndex(t *testing.T) {
+	customers := []CustomerConfig{
+		{
+			ID: "customer-001",
+			Ports: []PortConfig{
+				{Port: 8080, Service: "http"},
+				{Port: 8081, Service: "smb"},
+			},
+		},
+		{
+			ID: "customer-002",
+			Ports: []PortConfig{
+				{Port: 9080, Service: "http"},
+			},
+		},
+	}
+
+	idx, err := BuildPortIndex(customers)
+	require.NoError(t, err)
+	assert.Len(t, idx.Entries, 3)
+	assert.Equal(t, "customer-001", idx.Entries[8080].CustomerID)
+	assert.Equal(t, "http", idx.Entries[8080].Service)
+	assert.Equal(t, "customer-002", idx.Entries[9080].CustomerID)
+}
+
+func TestBuildPortIndex_DuplicatePort(t *testing.T) {
+	customers := []CustomerConfig{
+		{ID: "c1", Ports: []PortConfig{{Port: 8080, Service: "http"}}},
+		{ID: "c2", Ports: []PortConfig{{Port: 8080, Service: "web"}}},
+	}
+
+	_, err := BuildPortIndex(customers)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "port 8080 assigned to both")
 }

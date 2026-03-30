@@ -23,6 +23,7 @@ type AgentConfig struct {
 // ServerConfig holds network listener and limit settings for the relay.
 type ServerConfig struct {
 	ListenAddr          string        `yaml:"listen_addr"`
+	AdminAddr           string        `yaml:"admin_addr"`
 	AgentListenAddr     string        `yaml:"agent_listen_addr"`
 	MaxAgents           int           `yaml:"max_agents"`
 	MaxStreamsPerAgent  int           `yaml:"max_streams_per_agent"`
@@ -38,12 +39,19 @@ type TLSPaths struct {
 	ClientCAFile string `yaml:"client_ca_file"`
 }
 
-// CustomerConfig defines per-customer resource limits and port allowances.
+// CustomerConfig defines per-customer port allocations and resource limits.
 type CustomerConfig struct {
-	CustomerID       string `yaml:"customer_id"`
-	AllowedPorts     []int  `yaml:"allowed_ports"`
-	MaxStreams       int    `yaml:"max_streams"`
-	MaxBandwidthMbps int    `yaml:"max_bandwidth_mbps"`
+	ID               string       `yaml:"id"`
+	Ports            []PortConfig `yaml:"ports"`
+	MaxStreams       int          `yaml:"max_streams"`
+	MaxBandwidthMbps int          `yaml:"max_bandwidth_mbps"`
+}
+
+// PortConfig maps a relay-side port to a named service for a customer.
+type PortConfig struct {
+	Port        int    `yaml:"port"`
+	Service     string `yaml:"service"`
+	Description string `yaml:"description"`
 }
 
 // RelayConnection holds the agent-side settings for connecting to a relay.
