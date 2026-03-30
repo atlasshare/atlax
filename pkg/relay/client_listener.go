@@ -83,7 +83,7 @@ func (cl *ClientListener) handleClient(
 		return
 	}
 
-	if err := cl.router.Route(ctx, customerID, conn); err != nil {
+	if err := cl.router.Route(ctx, customerID, conn, port); err != nil {
 		cl.logger.Warn("relay: route failed",
 			"port", port,
 			"customer_id", customerID,
