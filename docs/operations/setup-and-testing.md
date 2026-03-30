@@ -3,16 +3,19 @@
 This guide walks through setting up atlax in three stages:
 
 1. **Local testing** -- both binaries on localhost
-2. **LAN testing** -- relay on MacBook, agent on Arch (via Tailscale)
-3. **Production-like** -- relay on AWS with static IP, agent on Arch
+2. **LAN testing** -- relay on MacBook, agent on Arch (via local network)
+3. **Production** -- relay on AWS EC2 with static IP, agent on customer node
+
+Tested and verified on 2026-03-30 with real Samba and web app traffic.
+
+---
 
 ## Prerequisites
 
 - Go 1.25+ installed on build machine
 - OpenSSL 3.x (for certificate generation)
-- Tailscale configured between MacBook (100.65.194.23) and Arch (100.103.184.98)
-- SSH access to Arch: `ssh 100.103.184.98`
-- An echo server or Samba running on Arch for traffic testing
+- SSH access to the agent host
+- For Stage 3: AWS EC2 instance with Elastic IP
 
 ---
 
@@ -23,9 +26,6 @@ This guide walks through setting up atlax in three stages:
 ```bash
 cd ~/projects/atlax
 make build
-# Or manually:
-go build -o bin/atlax-relay ./cmd/relay/
-go build -o bin/atlax-agent ./cmd/agent/
 ```
 
 Verify:
@@ -40,61 +40,42 @@ ls -la bin/atlax-relay bin/atlax-agent
 make certs-dev
 ```
 
-This creates `certs/` with the full CA hierarchy. Verify:
+Verify the chain:
 
 ```bash
 openssl verify -CAfile certs/root-ca.crt -untrusted certs/relay-ca.crt certs/relay.crt
 openssl verify -CAfile certs/root-ca.crt -untrusted certs/customer-ca.crt certs/agent.crt
-# Both should output: OK
 ```
 
-### 1.3 Start a local echo server (test target)
+Both should output `OK`.
 
-The agent needs a local service to forward traffic to. Start a simple echo server:
+### 1.3 Start a local echo server
+
+The agent needs a local service to forward traffic to:
 
 ```bash
-# Option A: ncat (from nmap)
-ncat -l -k -e /bin/cat 127.0.0.1 9999
-
-# Option B: socat
+# Option A: socat
 socat TCP-LISTEN:9999,reuseaddr,fork EXEC:cat
 
-# Option C: Go one-liner (save as /tmp/echo.go)
-cat > /tmp/echo.go << 'EOF'
-package main
-
-import (
-    "io"
-    "net"
-    "log"
-)
-
-func main() {
-    ln, err := net.Listen("tcp", "127.0.0.1:9999")
-    if err != nil { log.Fatal(err) }
-    log.Println("echo server listening on :9999")
-    for {
-        conn, err := ln.Accept()
-        if err != nil { continue }
-        go func() {
-            defer conn.Close()
-            io.Copy(conn, conn)
-        }()
-    }
-}
-EOF
-go run /tmp/echo.go
+# Option B: Python
+python3 -c "
+import socket, threading
+s = socket.socket(); s.setsockopt(socket.SOL_SOCKET, socket.SO_REUSEADDR, 1)
+s.bind(('127.0.0.1', 9999)); s.listen()
+print('echo server on :9999')
+while True:
+    c, _ = s.accept()
+    threading.Thread(target=lambda c=c: [c.sendall(c.recv(4096)), c.close()]).start()
+"
 ```
-
-Leave this running in a terminal.
 
 ### 1.4 Create relay config
 
-```bash
-cat > relay-local.yaml << 'EOF'
+Create `relay-local.yaml`:
+
+```yaml
 server:
-  listen_addr: ":8443"
-  admin_addr: ":9090"
+  listen_addr: 0.0.0.0:8443
   max_agents: 10
   max_streams_per_agent: 100
   idle_timeout: 300s
@@ -107,162 +88,24 @@ tls:
   client_ca_file: ./certs/customer-ca.crt
 
 customers:
-  - id: "customer-dev-001"
+  - id: customer-dev-001
     ports:
       - port: 18080
-        service: "echo"
-        description: "Echo test service"
+        service: echo
+        description: Echo test service
 
 logging:
   level: debug
   format: text
-EOF
 ```
-
-Port 18080 avoids conflicts with common services. The relay will listen on `:8443` for agents and `:18080` for clients.
 
 ### 1.5 Create agent config
 
-```bash
-cat > agent-local.yaml << 'EOF'
+Create `agent-local.yaml`:
+
+```yaml
 relay:
-  addr: "127.0.0.1:8443"
-  server_name: "relay.atlax.local"
-  keepalive_interval: 10s
-  keepalive_timeout: 5s
-
-tls:
-  cert_file: ./certs/agent.crt
-  key_file: ./certs/agent.key
-  ca_file: ./certs/relay-ca.crt
-
-services:
-  - name: "echo"
-    local_addr: "127.0.0.1:9999"
-    protocol: "tcp"
-
-logging:
-  level: debug
-  format: text
-EOF
-```
-
-### 1.6 Start relay
-
-```bash
-./bin/atlax-relay -config relay-local.yaml
-```
-
-Expected output (debug level):
-
-```
-{"level":"INFO","msg":"relay: agent listener started","addr":"[::]:8443"}
-{"level":"INFO","msg":"relay: client listener started","addr":"[::]:18080","port":18080}
-{"level":"INFO","msg":"relay started","listen_addr":":8443","customers":1,"ports":1}
-```
-
-### 1.7 Start agent (new terminal)
-
-```bash
-./bin/atlax-agent -config agent-local.yaml
-```
-
-Expected output:
-
-```
-{"level":"INFO","msg":"agent: connected to relay","addr":"127.0.0.1:8443"}
-{"level":"INFO","msg":"agent started","relay":"127.0.0.1:8443","services":1}
-```
-
-On the relay side, you should see:
-
-```
-{"level":"INFO","msg":"relay: agent connected","customer_id":"customer-dev-001",...}
-```
-
-### 1.8 Test the tunnel
-
-```bash
-# In a new terminal:
-echo "hello atlax" | nc localhost 18080
-# Should receive: hello atlax
-
-# Interactive test:
-nc localhost 18080
-# Type anything, press Enter. You should see it echoed back.
-# Press Ctrl+C to disconnect.
-```
-
-### 1.9 Verify graceful shutdown
-
-```bash
-# Kill the relay with SIGTERM:
-kill -TERM $(pgrep atlax-relay)
-# Relay should log GOAWAY and clean shutdown.
-# Agent should detect the disconnect.
-```
-
----
-
-## Stage 2: LAN Testing (Relay on MacBook, Agent on Arch via Tailscale)
-
-### 2.1 Regenerate certificates with Tailscale IP
-
-The default dev certs only have SANs for `localhost` and `127.0.0.1`. For cross-machine testing, the relay cert needs the MacBook's Tailscale IP.
-
-Edit `scripts/gen-certs.sh` and find the relay cert generation line (around line 103):
-
-```bash
-# Find this line:
-subjectAltName=DNS:relay.atlax.local,DNS:localhost,IP:127.0.0.1
-
-# Change to:
-subjectAltName=DNS:relay.atlax.local,DNS:localhost,IP:127.0.0.1,IP:100.65.194.23
-```
-
-Then regenerate:
-
-```bash
-rm -rf certs/
-make certs-dev
-```
-
-Verify the new cert has the Tailscale IP:
-
-```bash
-openssl x509 -in certs/relay.crt -noout -ext subjectAltName
-# Should show: IP Address:100.65.194.23
-```
-
-### 2.2 Cross-compile agent for Linux
-
-```bash
-GOOS=linux GOARCH=amd64 go build -o bin/atlax-agent-linux ./cmd/agent/
-```
-
-### 2.3 Copy files to Arch
-
-```bash
-# Create directory on Arch
-ssh 100.103.184.98 "mkdir -p ~/atlax/{certs,bin}"
-
-# Copy binary
-scp bin/atlax-agent-linux 100.103.184.98:~/atlax/bin/atlax-agent
-ssh 100.103.184.98 "chmod +x ~/atlax/bin/atlax-agent"
-
-# Copy certificates (agent needs: agent cert+key, relay CA for verification)
-scp certs/agent.crt certs/agent.key certs/relay-ca.crt 100.103.184.98:~/atlax/certs/
-```
-
-### 2.4 Create agent config on Arch
-
-SSH into Arch and create the file directly:
-
-```bash
-ssh 100.103.184.98
-cat > ~/atlax/agent.yaml << 'EOF'
-relay:
-  addr: 100.65.194.23:8443
+  addr: 127.0.0.1:8443
   server_name: relay.atlax.local
   keepalive_interval: 10s
   keepalive_timeout: 5s
@@ -273,8 +116,118 @@ tls:
   ca_file: ./certs/relay-ca.crt
 
 services:
-  - name: smb
-    local_addr: 127.0.0.1:445
+  - name: echo
+    local_addr: 127.0.0.1:9999
+    protocol: tcp
+
+logging:
+  level: debug
+  format: text
+```
+
+**Important:** The agent's `ca_file` must be `relay-ca.crt` (the Relay Intermediate CA), not `root-ca.crt`.
+
+### 1.6 Start relay
+
+```bash
+./bin/atlax-relay -config relay-local.yaml
+```
+
+### 1.7 Start agent (new terminal)
+
+```bash
+./bin/atlax-agent -config agent-local.yaml
+```
+
+You should see `agent: connected to relay` in the agent logs and `relay: agent connected` with `customer_id: customer-dev-001` in the relay logs.
+
+### 1.8 Test the tunnel
+
+```bash
+echo "hello atlax" | nc localhost 18080
+# Should receive: hello atlax
+```
+
+### 1.9 Test graceful shutdown
+
+```bash
+kill -TERM $(pgrep atlax-relay)
+```
+
+Relay logs GOAWAY and shuts down cleanly. Agent detects the disconnect.
+
+---
+
+## Stage 2: LAN Testing (relay on MacBook, agent on remote host)
+
+### 2.1 Regenerate certificates with relay IP
+
+The default dev certs only have SANs for `localhost` and `127.0.0.1`. For cross-machine testing, add the relay host's IP.
+
+Edit `scripts/gen-certs.sh`, find the relay cert SAN line (around line 103):
+
+```bash
+# Change this:
+subjectAltName=DNS:relay.atlax.local,DNS:localhost,IP:127.0.0.1
+
+# To this (replace with your relay host IP):
+subjectAltName=DNS:relay.atlax.local,DNS:localhost,IP:127.0.0.1,IP:<RELAY_IP>
+```
+
+Regenerate:
+
+```bash
+rm -rf certs/
+make certs-dev
+```
+
+Verify the new SAN:
+
+```bash
+openssl x509 -in certs/relay.crt -noout -ext subjectAltName
+```
+
+### 2.2 Cross-compile agent for the target platform
+
+```bash
+# For Linux amd64:
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/atlax-agent-linux ./cmd/agent/
+```
+
+### 2.3 Deploy to agent host
+
+```bash
+ssh <AGENT_HOST> "mkdir -p ~/atlax/{certs,bin}"
+
+# Copy binary
+scp bin/atlax-agent-linux <AGENT_HOST>:~/atlax/bin/atlax-agent
+ssh <AGENT_HOST> "chmod +x ~/atlax/bin/atlax-agent"
+
+# Copy ALL agent certs (agent cert+key, relay CA for verification)
+scp certs/agent.crt certs/agent.key certs/relay-ca.crt <AGENT_HOST>:~/atlax/certs/
+```
+
+### 2.4 Create agent config on remote host
+
+SSH into the agent host and create the config file directly:
+
+```bash
+ssh <AGENT_HOST>
+cat > ~/atlax/agent.yaml << 'EOF'
+relay:
+  addr: <RELAY_IP>:8443
+  server_name: relay.atlax.local
+  keepalive_interval: 10s
+  keepalive_timeout: 5s
+
+tls:
+  cert_file: ./certs/agent.crt
+  key_file: ./certs/agent.key
+  ca_file: ./certs/relay-ca.crt
+
+services:
+  - name: echo
+    local_addr: 127.0.0.1:9999
     protocol: tcp
 
 logging:
@@ -283,113 +236,48 @@ logging:
 EOF
 ```
 
-This forwards Samba (port 445) from the Arch box through the tunnel.
+**Do not create config files via SSH heredocs in a single command** (e.g., `ssh host "cat > file << 'EOF' ... EOF"`). The shell quoting corrupts YAML values with escaped quotes.
 
-### 2.5 Start relay on MacBook
+### 2.5 Start and test
 
-```bash
-cat > relay-tailscale.yaml << 'EOF'
-server:
-  listen_addr: "0.0.0.0:8443"
-  admin_addr: ":9090"
-  max_agents: 10
-  max_streams_per_agent: 100
-  idle_timeout: 300s
-  shutdown_grace_period: 10s
-
-tls:
-  cert_file: ./certs/relay.crt
-  key_file: ./certs/relay.key
-  ca_file: ./certs/root-ca.crt
-  client_ca_file: ./certs/customer-ca.crt
-
-customers:
-  - id: "customer-dev-001"
-    ports:
-      - port: 18445
-        service: "smb"
-        description: "Samba via tunnel"
-
-logging:
-  level: debug
-  format: text
-EOF
-
-./bin/atlax-relay -config relay-tailscale.yaml
-```
-
-### 2.6 Start agent on Arch
+Start the relay on the relay host, start the agent on the agent host, then test:
 
 ```bash
-ssh 100.103.184.98
-cd ~/atlax
-./bin/atlax-agent -config agent.yaml
-```
-
-### 2.7 Test SMB through the tunnel
-
-From the MacBook:
-
-```bash
-# Test raw TCP connectivity first:
-nc -zv localhost 18445
-# Should show: Connection to localhost port 18445 [tcp/*] succeeded!
-
-# Test SMB (if smbclient is installed):
-smbclient -L //127.0.0.1 -p 18445 -N
-# Should list the Samba shares from the Arch box
-
-# Or mount (macOS):
-# open smb://127.0.0.1:18445/SharedDrive
-```
-
-If Samba is not running on Arch, start an echo server instead:
-
-```bash
-# On Arch:
-ncat -l -k -e /bin/cat 127.0.0.1 9999
-
-# Update agent.yaml to point to 127.0.0.1:9999 instead of :445
-# Update relay config to use service: "echo" instead of "smb"
-```
-
-### 2.8 Verify cross-machine tunnel works
-
-```bash
-echo "hello from macbook through tailscale tunnel" | nc localhost 18445
-# Should echo back the message (if using echo server)
+echo "hello" | nc <RELAY_IP> 18080
 ```
 
 ---
 
-## Stage 3: AWS Production-Like (Relay on AWS, Agent on Arch)
+## Stage 3: Production (relay on AWS, agent on customer node)
 
-### 3.1 Provision AWS EC2 instance
+### 3.1 Provision AWS EC2
 
-- **AMI:** Ubuntu 24.04 LTS (or Amazon Linux 2023)
+- **AMI:** Ubuntu 24.04 LTS or Amazon Linux 2023
 - **Instance type:** t3.micro (sufficient for testing)
-- **Security group:** Allow inbound TCP on ports 8443 (agents) and 18445 (clients)
-- **Elastic IP:** Allocate and associate (you need a static IP)
-- **Key pair:** Use your existing SSH key
+- **Elastic IP:** Allocate and associate
+- **Security group inbound rules:**
+  - TCP 8443 (agent mTLS connections)
+  - TCP 18080+ (one per customer service port)
+  - TCP 22 (SSH)
 
-Note the public IP (e.g., `54.x.x.x`).
+### 3.2 Regenerate certificates with AWS Elastic IP
 
-### 3.2 Regenerate certificates with AWS IP
-
-Edit `scripts/gen-certs.sh`, update the relay SAN line:
+Edit `scripts/gen-certs.sh` SAN line:
 
 ```bash
-subjectAltName=DNS:relay.atlax.local,DNS:localhost,IP:127.0.0.1,IP:100.65.194.23,IP:54.x.x.x
+subjectAltName=DNS:relay.atlax.local,DNS:localhost,IP:127.0.0.1,IP:<ELASTIC_IP>
 ```
 
-Replace `54.x.x.x` with your actual Elastic IP. Regenerate:
+Regenerate and verify:
 
 ```bash
 rm -rf certs/
 make certs-dev
+openssl x509 -in certs/relay.crt -noout -ext subjectAltName
+# Must show: IP Address:<ELASTIC_IP>
 ```
 
-### 3.3 Cross-compile relay for Linux
+### 3.3 Cross-compile relay
 
 ```bash
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/atlax-relay-linux ./cmd/relay/
@@ -398,26 +286,22 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/atlax-relay-linux ./cmd/re
 ### 3.4 Deploy relay to AWS
 
 ```bash
-# Create directory
-ssh -i ~/.ssh/your-key.pem ubuntu@54.x.x.x "mkdir -p ~/atlax/{certs,bin}"
+ssh <VPS> "mkdir -p ~/atlax/{certs,bin}"
 
-# Copy binary
-scp -i ~/.ssh/your-key.pem bin/atlax-relay-linux ubuntu@54.x.x.x:~/atlax/bin/atlax-relay
-ssh -i ~/.ssh/your-key.pem ubuntu@54.x.x.x "chmod +x ~/atlax/bin/atlax-relay"
+# Binary
+scp bin/atlax-relay-linux <VPS>:~/atlax/bin/atlax-relay
+ssh <VPS> "chmod +x ~/atlax/bin/atlax-relay"
 
-# Copy certificates (relay needs: relay cert+key, root CA, customer CA)
-scp -i ~/.ssh/your-key.pem \
-  certs/relay.crt certs/relay.key \
-  certs/root-ca.crt certs/customer-ca.crt \
-  ubuntu@54.x.x.x:~/atlax/certs/
+# ALL relay certs: relay cert+key, root CA, customer CA
+scp certs/relay.crt certs/relay.key certs/root-ca.crt certs/customer-ca.crt <VPS>:~/atlax/certs/
 ```
 
 ### 3.5 Create relay config on AWS
 
-SSH into the instance and create the file directly:
+SSH into the VPS and create the config:
 
 ```bash
-ssh -i ~/.ssh/your-key.pem ubuntu@54.x.x.x
+ssh <VPS>
 cat > ~/atlax/relay.yaml << 'EOF'
 server:
   listen_addr: 0.0.0.0:8443
@@ -436,9 +320,12 @@ tls:
 customers:
   - id: customer-dev-001
     ports:
-      - port: 18445
-        service: smb
-        description: Samba via tunnel
+      - port: 18080
+        service: http
+        description: Web app
+      - port: 18070
+        service: api
+        description: API backend
 
 logging:
   level: info
@@ -446,12 +333,10 @@ logging:
 EOF
 ```
 
-### 3.6 Start relay on AWS (with systemd)
-
-Create a systemd unit for persistence:
+### 3.6 Create systemd unit for relay
 
 ```bash
-ssh -i ~/.ssh/your-key.pem ubuntu@54.x.x.x "sudo tee /etc/systemd/system/atlax-relay.service << 'SVCEOF'
+sudo tee /etc/systemd/system/atlax-relay.service << 'EOF'
 [Unit]
 Description=atlax Relay Server
 After=network-online.target
@@ -459,66 +344,48 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=ubuntu
-WorkingDirectory=/home/ubuntu/atlax
-ExecStart=/home/ubuntu/atlax/bin/atlax-relay -config /home/ubuntu/atlax/relay.yaml
+User=<YOUR_USER>
+WorkingDirectory=/home/<YOUR_USER>/atlax
+ExecStart=/home/<YOUR_USER>/atlax/bin/atlax-relay -config /home/<YOUR_USER>/atlax/relay.yaml
 Restart=always
 RestartSec=5
 LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target
-SVCEOF"
+EOF
 
-ssh -i ~/.ssh/your-key.pem ubuntu@54.x.x.x "sudo systemctl daemon-reload && sudo systemctl enable atlax-relay && sudo systemctl start atlax-relay"
+sudo systemctl daemon-reload
+sudo systemctl enable atlax-relay
+sudo systemctl start atlax-relay
 ```
 
 Verify:
 
 ```bash
-ssh -i ~/.ssh/your-key.pem ubuntu@54.x.x.x "sudo systemctl status atlax-relay"
-ssh -i ~/.ssh/your-key.pem ubuntu@54.x.x.x "sudo journalctl -u atlax-relay -f"
+sudo systemctl status atlax-relay
+sudo journalctl -u atlax-relay -f
 ```
 
-### 3.7 Update agent on Arch to point to AWS
+### 3.7 Deploy agent to customer node
 
-SSH into Arch and create the file:
+Follow the same steps as Stage 2, but point `relay.addr` to the Elastic IP.
 
-```bash
-ssh 100.103.184.98
-cat > ~/atlax/agent.yaml << 'EOF'
-relay:
-  addr: 54.x.x.x:8443
-  server_name: relay.atlax.local
-  keepalive_interval: 30s
-  keepalive_timeout: 10s
+**Critical: when you regenerate certs, deploy ALL files to ALL machines:**
 
-tls:
-  cert_file: ./certs/agent.crt
-  key_file: ./certs/agent.key
-  ca_file: ./certs/relay-ca.crt
+| Machine | Files needed |
+|---------|-------------|
+| Relay (AWS) | relay.crt, relay.key, root-ca.crt, customer-ca.crt |
+| Agent (customer) | agent.crt, agent.key, relay-ca.crt |
 
-services:
-  - name: smb
-    local_addr: 127.0.0.1:445
-    protocol: tcp
+Partial certificate deployment causes `tls: unknown certificate authority` errors.
 
-logging:
-  level: info
-  format: json
-EOF
-```
+### 3.8 Create systemd unit for agent
 
-Also copy the updated relay-ca.crt (in case it changed during cert regen):
+On the agent host:
 
 ```bash
-scp certs/relay-ca.crt 100.103.184.98:~/atlax/certs/
-```
-
-### 3.8 Start agent on Arch (with systemd)
-
-```bash
-ssh 100.103.184.98 "sudo tee /etc/systemd/system/atlax-agent.service << 'SVCEOF'
+sudo tee /etc/systemd/system/atlax-agent.service << 'EOF'
 [Unit]
 Description=atlax Tunnel Agent
 After=network-online.target
@@ -526,88 +393,183 @@ Wants=network-online.target
 
 [Service]
 Type=simple
-User=$(whoami)
-WorkingDirectory=/home/$(whoami)/atlax
-ExecStart=/home/$(whoami)/atlax/bin/atlax-agent -config /home/$(whoami)/atlax/agent.yaml
+User=<YOUR_USER>
+WorkingDirectory=/home/<YOUR_USER>/atlax
+ExecStart=/home/<YOUR_USER>/atlax/bin/atlax-agent -config /home/<YOUR_USER>/atlax/agent.yaml
 Restart=always
 RestartSec=5
 LimitNOFILE=65535
 
 [Install]
 WantedBy=multi-user.target
-SVCEOF"
+EOF
 
-ssh 100.103.184.98 "sudo systemctl daemon-reload && sudo systemctl enable atlax-agent && sudo systemctl start atlax-agent"
+sudo systemctl daemon-reload
+sudo systemctl enable atlax-agent
+sudo systemctl start atlax-agent
 ```
 
 ### 3.9 Test from anywhere
 
-From any machine that can reach the AWS public IP:
-
 ```bash
-# SMB through the tunnel:
-smbclient -L //54.x.x.x -p 18445 -N
+# Web app:
+curl http://<ELASTIC_IP>:18080
 
-# Or raw TCP echo test:
-echo "hello from the internet" | nc 54.x.x.x 18445
+# API:
+curl http://<ELASTIC_IP>:18070/health
+
+# SMB (CLI only -- Finder does not support custom ports):
+smbclient -L //<ELASTIC_IP> -p 18445 -N
 ```
 
-The traffic path: your machine -> AWS relay (port 18445) -> mTLS tunnel -> Arch agent -> Samba (127.0.0.1:445).
+### 3.10 Deploying new binaries
+
+The running binary file is locked by the OS. To deploy an update:
+
+```bash
+# 1. Stop the service
+ssh <VPS> "sudo systemctl stop atlax-relay"
+
+# 2. Upload new binary
+scp bin/atlax-relay-linux <VPS>:~/atlax/bin/atlax-relay
+
+# 3. Start the service
+ssh <VPS> "sudo systemctl start atlax-relay"
+```
+
+---
+
+## Multi-Service Configuration
+
+To expose multiple services through a single agent, each service needs a unique name that matches between the relay and agent configs.
+
+**Relay config (ports section):**
+
+```yaml
+customers:
+  - id: customer-dev-001
+    ports:
+      - port: 18445
+        service: smb
+      - port: 18080
+        service: http
+      - port: 18070
+        service: api
+```
+
+**Agent config (services section):**
+
+```yaml
+services:
+  - name: smb
+    local_addr: 127.0.0.1:445
+    protocol: tcp
+  - name: http
+    local_addr: 127.0.0.1:3009
+    protocol: tcp
+  - name: api
+    local_addr: 127.0.0.1:7070
+    protocol: tcp
+```
+
+The `service` name in the relay must exactly match the `name` in the agent. The relay sends the service name in the STREAM_OPEN frame payload, and the agent uses it to route to the correct local address.
+
+**If you only have one service**, the agent routes all streams to it regardless of the service name (single-service fallback).
+
+### Migrating Docker services to atlax
+
+If your services are Docker containers bound to a specific IP (e.g., Tailscale), rebind them to `127.0.0.1` so the atlax agent can reach them:
+
+```yaml
+# Before (Tailscale-bound):
+ports:
+  - "100.103.184.98:3009:3009"
+
+# After (localhost-bound, reachable by atlax agent):
+ports:
+  - "127.0.0.1:3009:3009"
+```
+
+For frontend apps with API backends, update the API URL environment variable to point to the relay's public address:
+
+```yaml
+environment:
+  - VITE_API_URL=http://<ELASTIC_IP>:18070
+```
+
+Rebuild the container after changing environment variables that are baked into the frontend build.
 
 ---
 
 ## Troubleshooting
 
-### Agent cannot connect to relay
+### Relay fails to start: "unknown port" or "invalid address"
+
+Config has quoted values with escaped characters. Check `relay.yaml` for `\"` -- YAML values should not have escaped quotes. Use unquoted values:
+
+```yaml
+# Wrong:
+listen_addr: \"0.0.0.0:8443\"
+
+# Correct:
+listen_addr: 0.0.0.0:8443
+```
+
+### Agent error: "tls: unknown certificate authority"
+
+The relay's `customer-ca.crt` does not match the CA that signed `agent.crt`. This happens after regenerating certificates without deploying all files. Fix: copy ALL cert files from the generation to ALL machines (see Section 3.7 table).
+
+Verify the chain:
 
 ```bash
-# Check relay is listening:
-ss -tlnp | grep 8443
+# On agent host:
+openssl verify -CAfile ~/atlax/certs/relay-ca.crt ~/atlax/certs/agent.crt
 
-# Check TLS handshake manually:
-openssl s_client -connect <relay-ip>:8443 \
-  -cert certs/agent.crt -key certs/agent.key \
-  -CAfile certs/relay-ca.crt \
-  -servername relay.atlax.local
+# On relay host:
+openssl x509 -in ~/atlax/certs/customer-ca.crt -noout -fingerprint -sha256
+# Compare with:
+openssl x509 -in ~/atlax/certs/agent.crt -noout -issuer
 ```
 
-### Certificate errors
+### Agent error: "certificate is not valid for <IP>"
 
-```
-tls: certificate is not valid for relay.atlax.local
-```
+The relay cert does not have the relay's IP in its Subject Alternative Names. Regenerate certs with the IP in the SAN (see Section 3.2).
 
-The agent's `server_name` must match a SAN in the relay cert. Either update `server_name` in agent.yaml or regenerate certs with the correct SAN.
+### Multi-service routing sends to wrong service
 
-```
-tls: unknown certificate authority
-```
+All services get the same response, or some services hang. Ensure:
+1. Service names match exactly between relay `ports[].service` and agent `services[].name`
+2. You are running relay binary version with the port-based routing fix (commit `79a88dd` or later)
 
-The agent's `ca_file` must be the Relay Intermediate CA (`relay-ca.crt`), not the root CA. The relay's `client_ca_file` must be the Customer Intermediate CA (`customer-ca.crt`).
+### Cannot SCP binary to relay: "Failure"
 
-### Relay shows "agent not found" on client connect
-
-The agent has not connected yet, or the customer ID in the cert (`customer-dev-001`) does not match the `id` in the relay's `customers` config.
-
-### Traffic does not flow after connection
-
-Check the service name matches: the relay's port config `service: "smb"` must match the agent's `services[].name: "smb"`. If they do not match and only one service is configured, the single-service fallback will route correctly. With multiple services, the names must match.
-
-### Firewall on Arch blocks local service
+The binary file is locked by the running process. Stop the service first:
 
 ```bash
-# Check if Samba is listening:
-ss -tlnp | grep 445
-
-# If iptables blocks localhost:
-sudo iptables -I INPUT -i lo -j ACCEPT
+sudo systemctl stop atlax-relay
 ```
+
+### macOS Finder / iOS Files: cannot connect to SMB on custom port
+
+Finder and iOS Files app do not support custom SMB ports. Use CLI tools or third-party apps:
+
+```bash
+# CLI:
+smbclient -L //<RELAY_IP> -p 18445 -N
+
+# Mount:
+mkdir -p /tmp/share
+mount_smbfs //<USER>@<RELAY_IP>:18445/SharedDrive /tmp/share
+```
+
+On iOS, use FE File Explorer or Documents by Readdle.
 
 ---
 
 ## Security Notes
 
-- **Dev certs are for testing only.** Do not use them in production. Production certs should be issued by a proper internal CA (step-ca, Vault PKI, cfssl).
-- **The relay's client-facing ports (18445) accept plain TCP.** Encryption is provided by the mTLS tunnel between relay and agent. The client-to-relay leg is unencrypted.
-- **Do not expose the agent listen port (8443) to the public internet without firewall rules.** Only agents with valid mTLS certificates can connect, but the port should still be restricted to known IP ranges if possible.
-- **Certificate private keys must be protected.** Use `chmod 600` on all `.key` files. Never commit keys to git.
+- **Dev certs are for testing only.** Production certs should be issued by a proper CA (step-ca, Vault PKI, cfssl).
+- **Client-facing relay ports accept plain TCP.** Encryption is provided by the mTLS tunnel between relay and agent. The client-to-relay leg is unencrypted.
+- **Restrict the agent listener port (8443).** Only agents with valid mTLS certs can connect, but limit source IPs via security group if possible.
+- **Protect private keys.** Use `chmod 600` on all `.key` files. Never commit keys to git.
+- **Certificate deployment is all-or-nothing.** When regenerating, update every file on every machine from the same generation.
