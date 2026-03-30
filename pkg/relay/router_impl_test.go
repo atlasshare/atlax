@@ -77,7 +77,7 @@ func TestPortRouter_RouteNoAgent(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), time.Second)
 	defer cancel()
 
-	err := router.Route(ctx, "customer-001", c1)
+	err := router.Route(ctx, "customer-001", c1, 8080)
 	assert.Error(t, err)
 	assert.Contains(t, err.Error(), "agent not found")
 }
@@ -148,7 +148,7 @@ func TestPortRouter_RouteEndToEnd(t *testing.T) {
 
 	routeDone := make(chan error, 1)
 	go func() {
-		routeDone <- router.Route(ctx, "customer-001", relayEnd)
+		routeDone <- router.Route(ctx, "customer-001", relayEnd, 8080)
 	}()
 
 	// Client sends data
