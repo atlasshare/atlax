@@ -2,7 +2,7 @@
 
 **Objective:** Implement the atlax relay server (`atlax-relay` binary) that accepts agent mTLS connections, listens for client TCP traffic on dedicated per-customer ports, and routes traffic through multiplexed streams to the correct agent. Also resolves three high-priority Phase 2 carry-forward items.
 
-**Status:** NOT STARTED
+**Status:** ALL STEPS COMPLETE
 **Target duration:** 3 weeks
 **Estimated sessions:** 5-8 (steps 1-2 serial, steps 3-4 parallelizable, steps 5-6 serial)
 
@@ -531,6 +531,19 @@ If requirements change during execution:
 5. **Abandon**: Mark as ABANDONED, document reason, clean up any partial work
 
 All mutations must be recorded in this plan file with timestamp and rationale.
+
+---
+
+## Execution Log
+
+| Step | Status | PR | Date |
+|------|--------|----|------|
+| Step 1: STREAM_CLOSE emission | COMPLETED | #25 | 2026-03-29 |
+| Step 2: Agent Registry + Listener | COMPLETED | #26 | 2026-03-29 |
+| Step 3: Traffic Router + STREAM_OPEN | COMPLETED | #27 | 2026-03-29 |
+| Step 4: Relay Config | COMPLETED | #28 | 2026-03-29 |
+| Step 5: cmd/relay + Shutdown | COMPLETED | #29 | 2026-03-29 |
+| Step 6: Integration & Ship | COMPLETED | #30 | 2026-03-29 |
 
 ---
 
