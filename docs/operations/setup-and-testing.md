@@ -256,11 +256,14 @@ scp certs/agent.crt certs/agent.key certs/relay-ca.crt 100.103.184.98:~/atlax/ce
 
 ### 2.4 Create agent config on Arch
 
+SSH into Arch and create the file directly:
+
 ```bash
-ssh 100.103.184.98 "cat > ~/atlax/agent.yaml << 'EOF'
+ssh 100.103.184.98
+cat > ~/atlax/agent.yaml << 'EOF'
 relay:
-  addr: \"100.65.194.23:8443\"
-  server_name: \"relay.atlax.local\"
+  addr: 100.65.194.23:8443
+  server_name: relay.atlax.local
   keepalive_interval: 10s
   keepalive_timeout: 5s
 
@@ -270,14 +273,14 @@ tls:
   ca_file: ./certs/relay-ca.crt
 
 services:
-  - name: \"smb\"
-    local_addr: \"127.0.0.1:445\"
-    protocol: \"tcp\"
+  - name: smb
+    local_addr: 127.0.0.1:445
+    protocol: tcp
 
 logging:
   level: debug
   format: text
-EOF"
+EOF
 ```
 
 This forwards Samba (port 445) from the Arch box through the tunnel.
@@ -411,11 +414,14 @@ scp -i ~/.ssh/your-key.pem \
 
 ### 3.5 Create relay config on AWS
 
+SSH into the instance and create the file directly:
+
 ```bash
-ssh -i ~/.ssh/your-key.pem ubuntu@54.x.x.x "cat > ~/atlax/relay.yaml << 'RELAYEOF'
+ssh -i ~/.ssh/your-key.pem ubuntu@54.x.x.x
+cat > ~/atlax/relay.yaml << 'EOF'
 server:
-  listen_addr: \"0.0.0.0:8443\"
-  admin_addr: \"127.0.0.1:9090\"
+  listen_addr: 0.0.0.0:8443
+  admin_addr: 127.0.0.1:9090
   max_agents: 100
   max_streams_per_agent: 100
   idle_timeout: 300s
@@ -428,16 +434,16 @@ tls:
   client_ca_file: ./certs/customer-ca.crt
 
 customers:
-  - id: \"customer-dev-001\"
+  - id: customer-dev-001
     ports:
       - port: 18445
-        service: \"smb\"
-        description: \"Samba via tunnel\"
+        service: smb
+        description: Samba via tunnel
 
 logging:
   level: info
   format: json
-RELAYEOF"
+EOF
 ```
 
 ### 3.6 Start relay on AWS (with systemd)
@@ -476,11 +482,14 @@ ssh -i ~/.ssh/your-key.pem ubuntu@54.x.x.x "sudo journalctl -u atlax-relay -f"
 
 ### 3.7 Update agent on Arch to point to AWS
 
+SSH into Arch and create the file:
+
 ```bash
-ssh 100.103.184.98 "cat > ~/atlax/agent.yaml << 'EOF'
+ssh 100.103.184.98
+cat > ~/atlax/agent.yaml << 'EOF'
 relay:
-  addr: \"54.x.x.x:8443\"
-  server_name: \"relay.atlax.local\"
+  addr: 54.x.x.x:8443
+  server_name: relay.atlax.local
   keepalive_interval: 30s
   keepalive_timeout: 10s
 
@@ -490,14 +499,14 @@ tls:
   ca_file: ./certs/relay-ca.crt
 
 services:
-  - name: \"smb\"
-    local_addr: \"127.0.0.1:445\"
-    protocol: \"tcp\"
+  - name: smb
+    local_addr: 127.0.0.1:445
+    protocol: tcp
 
 logging:
   level: info
   format: json
-EOF"
+EOF
 ```
 
 Also copy the updated relay-ca.crt (in case it changed during cert regen):
