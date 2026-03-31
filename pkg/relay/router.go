@@ -9,8 +9,8 @@ import (
 // based on customer identity and port allocation.
 type TrafficRouter interface {
 	// Route forwards a client connection to the agent owning the given
-	// customer ID.
-	Route(ctx context.Context, customerID string, clientConn net.Conn) error
+	// customer ID. The port identifies which service to route to.
+	Route(ctx context.Context, customerID string, clientConn net.Conn, port int) error
 
 	// AddPortMapping assigns a relay-side port to a specific service for the
 	// given customer.

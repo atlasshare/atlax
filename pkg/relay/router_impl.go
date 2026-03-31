@@ -60,23 +60,22 @@ func (r *PortRouter) RemovePortMapping(customerID string, port int) error {
 	return nil
 }
 
-// Route forwards a client connection to the agent owning the port the
-// client connected on.
+// Route forwards a client connection to the agent owning the given
+// port. The port determines which customer and service to route to.
 func (r *PortRouter) Route(
 	ctx context.Context,
 	customerID string,
 	clientConn net.Conn,
+	port int,
 ) error {
 	r.mu.RLock()
-	// Find the service name for this customer's route.
-	var service string
-	for _, entry := range r.portMap {
-		if entry.customerID == customerID {
-			service = entry.service
-			break
-		}
-	}
+	entry, ok := r.portMap[port]
 	r.mu.RUnlock()
+
+	var service string
+	if ok {
+		service = entry.service
+	}
 
 	conn, err := r.registry.Lookup(ctx, customerID)
 	if err != nil {
