@@ -2,7 +2,7 @@
 
 **Objective:** Harden the relay for multi-tenant operation. Enforce per-customer resource isolation (stream limits, connection limits, rate limiting), add cross-tenant isolation verification, and introduce per-customer metrics. This phase transforms the relay from a single-tenant dev tool into a multi-tenant-ready service.
 
-**Status:** NOT STARTED
+**Status:** ALL STEPS COMPLETE
 **Target duration:** 1-2 weeks
 **Estimated sessions:** 3-5 (steps 1-3 serial, step 4 parallel with 3)
 
@@ -346,11 +346,11 @@ Same as Phase 3. All mutations recorded with timestamp and rationale.
 
 | Step | Status | PR | Date |
 |------|--------|----|------|
-| Step 1: Customer limits | NOT STARTED | -- | -- |
-| Step 2: Rate limiting | NOT STARTED | -- | -- |
-| Step 3: Isolation + metrics | NOT STARTED | -- | -- |
-| Step 4: Config + docs | NOT STARTED | -- | -- |
-| Step 5: Integration & Ship | NOT STARTED | -- | -- |
+| Step 1: Customer limits | COMPLETED | #47 | 2026-04-01 |
+| Step 2: Rate limiting | COMPLETED | #48 | 2026-04-01 |
+| Step 3: Isolation + metrics | COMPLETED | #49 | 2026-04-01 |
+| Step 4: Config + docs | COMPLETED | #50 | 2026-04-01 |
+| Step 5: Integration & Ship | COMPLETED | #51 | 2026-04-01 |
 
 ---
 
