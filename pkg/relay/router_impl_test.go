@@ -29,7 +29,7 @@ func TestPortRouter_AddAndLookup(t *testing.T) {
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
 
-	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http"))
+	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http", 0))
 
 	cid, svc, ok := router.LookupPort(8080)
 	assert.True(t, ok)
@@ -49,7 +49,7 @@ func TestPortRouter_RemovePortMapping(t *testing.T) {
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
 
-	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http"))
+	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http", 0))
 	require.NoError(t, router.RemovePortMapping("customer-001", 8080))
 
 	_, _, ok := router.LookupPort(8080)
@@ -60,7 +60,7 @@ func TestPortRouter_RemoveWrongCustomer(t *testing.T) {
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
 
-	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http"))
+	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http", 0))
 	err := router.RemovePortMapping("customer-002", 8080)
 	assert.Error(t, err)
 }
@@ -68,7 +68,7 @@ func TestPortRouter_RemoveWrongCustomer(t *testing.T) {
 func TestPortRouter_RouteNoAgent(t *testing.T) {
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
-	router.AddPortMapping("customer-001", 8080, "http") //nolint:errcheck // test setup, error not relevant
+	router.AddPortMapping("customer-001", 8080, "http", 0) //nolint:errcheck // test setup, error not relevant
 
 	c1, c2 := net.Pipe()
 	defer c1.Close()
@@ -86,7 +86,7 @@ func TestPortRouter_RouteEndToEnd(t *testing.T) {
 	// Set up: registry, router, agent mux pair, echo server
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
-	router.AddPortMapping("customer-001", 8080, "echo") //nolint:errcheck // test setup, error not relevant
+	router.AddPortMapping("customer-001", 8080, "echo", 0) //nolint:errcheck // test setup, error not relevant
 
 	// Create relay<->agent mux pair
 	relayConn, agentConn := net.Pipe()
@@ -190,4 +190,80 @@ func TestPortRouter_StreamOpenPayloadCarriesServiceName(t *testing.T) {
 	ss, ok := stream.(*protocol.StreamSession)
 	require.True(t, ok)
 	assert.Equal(t, "smb", string(ss.OpenPayload()))
+}
+
+func TestPortRouter_StreamLimitEnforced(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+	router.AddPortMapping("customer-001", 8080, "echo", 1) //nolint:errcheck // test setup, error not relevant
+
+	// Create relay<->agent mux pair
+	relayConn, agentConn := net.Pipe()
+	relayMux := protocol.NewMuxSession(relayConn, protocol.RoleRelay, testMuxConfig())
+	agentMux := protocol.NewMuxSession(agentConn, protocol.RoleAgent, testMuxConfig())
+	defer relayMux.Close()
+	defer agentMux.Close()
+
+	live := NewLiveConnection("customer-001", relayMux, relayConn.RemoteAddr())
+	require.NoError(t, reg.Register(context.Background(), "customer-001", live))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// First stream: accept on agent side to keep it open
+	go func() {
+		agentMux.AcceptStream(ctx) //nolint:errcheck // test helper
+	}()
+
+	// Open one stream to fill the limit
+	c1, c2 := net.Pipe()
+	go func() {
+		router.Route(ctx, "customer-001", c2, 8080) //nolint:errcheck // test setup, error not relevant
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	// Second route should fail with stream limit
+	c3, c4 := net.Pipe()
+	defer c3.Close()
+	err := router.Route(ctx, "customer-001", c4, 8080)
+	assert.ErrorIs(t, err, ErrStreamLimitExceeded)
+
+	c1.Close()
+}
+
+func TestPortRouter_StreamLimitZeroIsUnlimited(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+	router.AddPortMapping("customer-001", 8080, "echo", 0) //nolint:errcheck // test setup, error not relevant
+
+	relayConn, agentConn := net.Pipe()
+	relayMux := protocol.NewMuxSession(relayConn, protocol.RoleRelay, testMuxConfig())
+	agentMux := protocol.NewMuxSession(agentConn, protocol.RoleAgent, testMuxConfig())
+	defer relayMux.Close()
+	defer agentMux.Close()
+
+	live := NewLiveConnection("customer-001", relayMux, relayConn.RemoteAddr())
+	require.NoError(t, reg.Register(context.Background(), "customer-001", live))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	// Accept streams on agent side
+	go func() {
+		for {
+			if _, err := agentMux.AcceptStream(ctx); err != nil {
+				return
+			}
+		}
+	}()
+
+	// Should be able to open multiple streams with limit 0
+	for range 3 {
+		c1, c2 := net.Pipe()
+		go func() {
+			router.Route(ctx, "customer-001", c2, 8080) //nolint:errcheck // test setup, error not relevant
+		}()
+		time.Sleep(50 * time.Millisecond)
+		c1.Close()
+	}
 }
