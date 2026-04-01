@@ -41,10 +41,25 @@ tls:
 # Production uses CN=customer-{uuid}; dev uses customer-dev-001.
 customers:
   - id: "customer-dev-001"
+
+    # Maximum concurrent connections from this customer's agents.
+    # Default 1: new agent connection replaces old one with GOAWAY.
+    max_connections: 1
+
+    # Maximum concurrent streams (active client connections forwarded
+    # to this customer). 0 = unlimited.
+    max_streams: 100
+
     ports:
       - port: 8080
         service: "http"
         description: "HTTP web service"
+
+        # Bind address for this port. Default: 0.0.0.0 (all interfaces).
+        # Set to 127.0.0.1 when using a reverse proxy (Caddy/nginx)
+        # so only the proxy can reach the relay port.
+        # listen_addr: "127.0.0.1"
+
       - port: 8081
         service: "smb"
         description: "SMB file sharing"

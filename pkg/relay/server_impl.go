@@ -58,8 +58,8 @@ func (s *Relay) Start(ctx context.Context) error {
 	}
 
 	// Start per-port client listeners.
-	for port := range s.portIndex.Entries {
-		addr := fmt.Sprintf(":%d", port)
+	for port, entry := range s.portIndex.Entries {
+		addr := fmt.Sprintf("%s:%d", entry.ListenAddr, port)
 		go func(a string, p int) {
 			if err := s.clientListener.StartPort(ctx, a, p); err != nil {
 				s.logger.Error("relay: client listener failed",

@@ -53,6 +53,7 @@ type PortConfig struct {
 	Port        int    `yaml:"port"`
 	Service     string `yaml:"service"`
 	Description string `yaml:"description"`
+	ListenAddr  string `yaml:"listen_addr"` // default: 0.0.0.0 (all interfaces)
 }
 
 // RelayConnection holds the agent-side settings for connecting to a relay.
