@@ -241,29 +241,52 @@ Add counters and gauges per customer_id label:
 
 ---
 
-## Step 4: Config Updates + Documentation -- TDD
+## Step 4: Per-Port ListenAddr + Config + Documentation -- TDD
 
 **Branch:** `phase4/config-docs`
 **Depends on:** Step 1 (config struct changes)
-**Model tier:** haiku (docs + light config)
+**Model tier:** default
 **Parallel with:** Step 3
 **Rollback:** `git branch -D phase4/config-docs`
 
 ### Context Brief
 
-Update `relay.example.yaml` to include the new fields (max_connections, rate_limit, max_streams with defaults). Update the setup guide with multi-tenant configuration examples.
+Three deliverables:
+
+**Per-port ListenAddr**: Add `ListenAddr` field to `PortConfig`. Default `0.0.0.0` (direct exposure). Set to `127.0.0.1` for reverse proxy deployments where Caddy/nginx handles TLS termination and subdomain routing on the edge. This is a deployment knob, not an architecture change -- atlax remains a transport layer.
+
+Production topology with Caddy:
+```
+Internet -> Caddy (443, TLS, subdomain routing) -> 127.0.0.1:PORT -> relay -> tunnel -> agent
+```
+
+**Config updates**: Update `relay.example.yaml` with all Phase 4 fields (max_connections, rate_limit, max_streams, listen_addr per port).
+
+**Documentation**: Multi-tenancy guide explaining isolation guarantees, Caddy integration, and deployment patterns.
 
 ### Tasks
 
-- [ ] Update `configs/relay.example.yaml` with new fields and comments
-- [ ] Update `docs/operations/setup-and-testing.md` with multi-tenant example
+#### Per-port ListenAddr: `internal/config/config.go`, `pkg/relay/server_impl.go`
+
+- [ ] Add `ListenAddr string \`yaml:"listen_addr"\`` to `PortConfig` (default: `0.0.0.0`)
+- [ ] Update `Relay.Start` to use `entry.ListenAddr:port` instead of `:port`
+- [ ] Update `BuildPortIndex` to carry ListenAddr through PortIndexEntry
+- [ ] Tests for custom listen_addr in config loading and server startup
+
+#### Config and docs
+
+- [ ] Update `configs/relay.example.yaml` with all new fields and comments
+- [ ] Update `docs/operations/setup-and-testing.md` with multi-tenant and Caddy examples
 - [ ] Add `docs/operations/multi-tenancy.md` explaining isolation guarantees
 - [ ] Tests for config loading with new fields
 
 ### Exit Criteria
 
+- Per-port ListenAddr works (customer ports bindable to 127.0.0.1)
 - Example config reflects all Phase 4 features
-- Documentation explains isolation model
+- Documentation explains isolation model and Caddy pattern
+- Coverage >= 90%
+- Step report written
 - PR merged
 
 ---
