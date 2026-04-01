@@ -11,19 +11,28 @@ import (
 // ClientListener accepts plain TCP connections on per-customer dedicated
 // ports and routes them through the TrafficRouter to the correct agent.
 type ClientListener struct {
-	router    *PortRouter
-	logger    *slog.Logger
-	listeners map[int]net.Listener
+	router      *PortRouter
+	logger      *slog.Logger
+	rateLimiter *IPRateLimiter
+	listeners   map[int]net.Listener
 
 	mu sync.Mutex
 }
 
+// ClientListenerConfig holds settings for the client listener.
+type ClientListenerConfig struct {
+	Router      *PortRouter
+	Logger      *slog.Logger
+	RateLimiter *IPRateLimiter // nil = no rate limiting
+}
+
 // NewClientListener creates a client listener.
-func NewClientListener(router *PortRouter, logger *slog.Logger) *ClientListener {
+func NewClientListener(cfg ClientListenerConfig) *ClientListener {
 	return &ClientListener{
-		router:    router,
-		logger:    logger,
-		listeners: make(map[int]net.Listener),
+		router:      cfg.Router,
+		logger:      cfg.Logger,
+		rateLimiter: cfg.RateLimiter,
+		listeners:   make(map[int]net.Listener),
 	}
 }
 
@@ -74,6 +83,21 @@ func (cl *ClientListener) handleClient(
 	conn net.Conn,
 	port int,
 ) {
+	// Rate limit by source IP.
+	if cl.rateLimiter != nil {
+		ip, _, err := net.SplitHostPort(conn.RemoteAddr().String())
+		if err != nil {
+			ip = conn.RemoteAddr().String()
+		}
+		if !cl.rateLimiter.Allow(ip) {
+			cl.logger.Warn("relay: rate limited",
+				"port", port,
+				"remote_addr", conn.RemoteAddr())
+			conn.Close()
+			return
+		}
+	}
+
 	customerID, _, ok := cl.router.LookupPort(port)
 	if !ok {
 		cl.logger.Warn("relay: no mapping for client port",
@@ -101,6 +125,10 @@ func (cl *ClientListener) Stop() {
 		cl.logger.Info("relay: client listener stopped", "port", port)
 	}
 	cl.listeners = make(map[int]net.Listener)
+
+	if cl.rateLimiter != nil {
+		cl.rateLimiter.Stop()
+	}
 }
 
 // Addr returns the listening address for the given port, or nil.
