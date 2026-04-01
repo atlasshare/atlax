@@ -21,7 +21,7 @@ func TestRelay_StopWithoutStart(t *testing.T) {
 
 	reg := NewMemoryRegistry(logger)
 	router := NewPortRouter(reg, logger)
-	cl := NewClientListener(router, logger)
+	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: logger})
 
 	server := NewRelay(ServerDeps{
 		AgentListener: NewAgentListener(AgentListenerConfig{
@@ -53,7 +53,7 @@ func TestRelay_StartRegistersPortMappings(t *testing.T) {
 
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
-	cl := NewClientListener(router, slog.Default())
+	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
 
 	portIndex := &config.PortIndex{
 		Entries: map[int]config.PortIndexEntry{
@@ -102,7 +102,7 @@ func TestRelay_StartRegistersPortMappings(t *testing.T) {
 func TestRelay_GracefulShutdownSendsGoAway(t *testing.T) {
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
-	cl := NewClientListener(router, slog.Default())
+	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
 
 	// Register a mock agent
 	conn, agentMux := testConnectionPair("customer-001")

@@ -74,7 +74,7 @@ func run() error {
 	})
 
 	router := relay.NewPortRouter(registry, logger)
-	clientListener := relay.NewClientListener(router, logger)
+	clientListener := relay.NewClientListener(relay.ClientListenerConfig{Router: router, Logger: logger})
 
 	server := relay.NewRelay(relay.ServerDeps{
 		AgentListener:  agentListener,
