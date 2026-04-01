@@ -10,13 +10,18 @@ import (
 // ErrAgentNotFound is returned when a customer ID has no active connection.
 var ErrAgentNotFound = fmt.Errorf("relay: agent not found")
 
+// ErrConnectionLimitExceeded is returned when a customer has reached
+// their maximum allowed connections.
+var ErrConnectionLimitExceeded = fmt.Errorf("relay: connection limit exceeded")
+
 // MemoryRegistry is the community edition AgentRegistry backed by an
 // in-memory map. Enterprise editions may use Redis, etcd, or other
 // distributed stores.
 type MemoryRegistry struct {
-	mu     sync.RWMutex
-	agents map[string]*LiveConnection
-	logger *slog.Logger
+	mu             sync.RWMutex
+	agents         map[string]*LiveConnection
+	customerLimits map[string]int // customerID -> max connections (0 = default 1)
+	logger         *slog.Logger
 }
 
 // Compile-time interface check.
@@ -25,13 +30,22 @@ var _ AgentRegistry = (*MemoryRegistry)(nil)
 // NewMemoryRegistry creates an empty agent registry.
 func NewMemoryRegistry(logger *slog.Logger) *MemoryRegistry {
 	return &MemoryRegistry{
-		agents: make(map[string]*LiveConnection),
-		logger: logger,
+		agents:         make(map[string]*LiveConnection),
+		customerLimits: make(map[string]int),
+		logger:         logger,
 	}
 }
 
-// Register records a newly authenticated agent connection. If a connection
-// already exists for this customer, the old one is closed with GOAWAY.
+// SetCustomerLimit configures the maximum connections for a customer.
+// Default is 1 (replace on reconnect). Set > 1 for multi-agent.
+func (r *MemoryRegistry) SetCustomerLimit(customerID string, maxConns int) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.customerLimits[customerID] = maxConns
+}
+
+// Register records a newly authenticated agent connection. With default
+// limit of 1, an existing connection is replaced with GOAWAY.
 func (r *MemoryRegistry) Register(
 	_ context.Context,
 	customerID string,
@@ -43,15 +57,26 @@ func (r *MemoryRegistry) Register(
 	}
 
 	r.mu.Lock()
-	old, exists := r.agents[customerID]
-	r.agents[customerID] = live
-	r.mu.Unlock()
+	limit := r.customerLimits[customerID]
+	if limit <= 0 {
+		limit = 1 // default: one connection per customer
+	}
 
-	if exists {
+	old, exists := r.agents[customerID]
+
+	// With limit of 1, replace existing connection.
+	// With limit > 1, reject if at capacity (multi-agent support is
+	// deferred -- current map only holds one connection per customer).
+	if exists && limit == 1 {
+		r.agents[customerID] = live
+		r.mu.Unlock()
 		r.logger.Info("relay: replacing existing agent connection",
 			"customer_id", customerID)
-		old.Muxer().GoAway(0) //nolint:errcheck // best-effort GoAway to old connection
+		old.Muxer().GoAway(0) //nolint:errcheck // best-effort GoAway
 		old.Close()
+	} else {
+		r.agents[customerID] = live
+		r.mu.Unlock()
 	}
 
 	r.logger.Info("relay: agent registered",

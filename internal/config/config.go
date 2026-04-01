@@ -43,6 +43,7 @@ type TLSPaths struct {
 type CustomerConfig struct {
 	ID               string       `yaml:"id"`
 	Ports            []PortConfig `yaml:"ports"`
+	MaxConnections   int          `yaml:"max_connections"`
 	MaxStreams       int          `yaml:"max_streams"`
 	MaxBandwidthMbps int          `yaml:"max_bandwidth_mbps"`
 }

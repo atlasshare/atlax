@@ -21,9 +21,13 @@ type PortRouter struct {
 	portMap map[int]portEntry // port -> customer+service
 }
 
+// ErrStreamLimitExceeded is returned when a customer's stream limit is reached.
+var ErrStreamLimitExceeded = fmt.Errorf("relay: stream limit exceeded")
+
 type portEntry struct {
 	customerID string
 	service    string
+	maxStreams int
 }
 
 // Compile-time interface check.
@@ -39,10 +43,14 @@ func NewPortRouter(registry AgentRegistry, logger *slog.Logger) *PortRouter {
 }
 
 // AddPortMapping assigns a relay-side port to a customer's service.
-func (r *PortRouter) AddPortMapping(customerID string, port int, service string) error {
+func (r *PortRouter) AddPortMapping(customerID string, port int, service string, maxStreams int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	r.portMap[port] = portEntry{customerID: customerID, service: service}
+	r.portMap[port] = portEntry{
+		customerID: customerID,
+		service:    service,
+		maxStreams: maxStreams,
+	}
 	return nil
 }
 
@@ -73,13 +81,21 @@ func (r *PortRouter) Route(
 	r.mu.RUnlock()
 
 	var service string
+	var maxStreams int
 	if ok {
 		service = entry.service
+		maxStreams = entry.maxStreams
 	}
 
 	conn, err := r.registry.Lookup(ctx, customerID)
 	if err != nil {
 		return fmt.Errorf("relay: route: %w", err)
+	}
+
+	// Enforce per-customer stream limit before opening.
+	if maxStreams > 0 && conn.Muxer().NumStreams() >= maxStreams {
+		return fmt.Errorf("relay: route: %w: customer %s has %d/%d streams",
+			ErrStreamLimitExceeded, customerID, conn.Muxer().NumStreams(), maxStreams)
 	}
 
 	mux, ok := conn.Muxer().(*protocol.MuxSession)

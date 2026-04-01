@@ -156,10 +156,11 @@ type PortIndex struct {
 	Entries map[int]PortIndexEntry
 }
 
-// PortIndexEntry holds the customer and service for a single port.
+// PortIndexEntry holds the customer, service, and limits for a single port.
 type PortIndexEntry struct {
 	CustomerID string
 	Service    string
+	MaxStreams int
 }
 
 // BuildPortIndex creates a port-to-customer-service index from the relay
@@ -176,6 +177,7 @@ func BuildPortIndex(customers []CustomerConfig) (*PortIndex, error) {
 			idx.Entries[p.Port] = PortIndexEntry{
 				CustomerID: c.ID,
 				Service:    p.Service,
+				MaxStreams: c.MaxStreams,
 			}
 		}
 	}
