@@ -349,3 +349,29 @@ func TestBuildPortIndex_DuplicatePort(t *testing.T) {
 	require.Error(t, err)
 	assert.Contains(t, err.Error(), "port 8080 assigned to both")
 }
+
+func TestBuildPortIndex_ListenAddrDefault(t *testing.T) {
+	customers := []CustomerConfig{
+		{
+			ID:    "c1",
+			Ports: []PortConfig{{Port: 8080, Service: "http"}},
+		},
+	}
+	idx, err := BuildPortIndex(customers)
+	require.NoError(t, err)
+	assert.Equal(t, "0.0.0.0", idx.Entries[8080].ListenAddr)
+}
+
+func TestBuildPortIndex_ListenAddrCustom(t *testing.T) {
+	customers := []CustomerConfig{
+		{
+			ID: "c1",
+			Ports: []PortConfig{
+				{Port: 8080, Service: "http", ListenAddr: "127.0.0.1"},
+			},
+		},
+	}
+	idx, err := BuildPortIndex(customers)
+	require.NoError(t, err)
+	assert.Equal(t, "127.0.0.1", idx.Entries[8080].ListenAddr)
+}
