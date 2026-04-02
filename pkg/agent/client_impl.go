@@ -46,6 +46,11 @@ type TunnelClient struct {
 	status        ClientStatus
 	heartbeatStop context.CancelFunc
 	closed        bool
+
+	// disconnectCh is written to when the heartbeat detects a dead
+	// connection. The tunnel supervision loop reads this to trigger
+	// reconnection.
+	disconnectCh chan struct{}
 }
 
 // Compile-time interface check.
@@ -55,10 +60,11 @@ var _ Client = (*TunnelClient)(nil)
 // TLS dialer (useful for testing).
 func NewClient(cfg ClientConfig, logger *slog.Logger, opts ...ClientOption) *TunnelClient {
 	c := &TunnelClient{
-		config:  cfg,
-		logger:  logger,
-		backoff: DefaultBackoffConfig(),
-		status:  ClientStatus{RelayAddr: cfg.RelayAddr},
+		config:       cfg,
+		logger:       logger,
+		backoff:      DefaultBackoffConfig(),
+		status:       ClientStatus{RelayAddr: cfg.RelayAddr},
+		disconnectCh: make(chan struct{}, 1),
 	}
 
 	if cfg.ReconnectBackoff > 0 {
@@ -197,6 +203,12 @@ func (c *TunnelClient) Mux() *protocol.MuxSession {
 	return c.mux
 }
 
+// DisconnectCh returns a channel that receives when the heartbeat
+// detects a dead connection. Used by the tunnel supervision loop.
+func (c *TunnelClient) DisconnectCh() <-chan struct{} {
+	return c.disconnectCh
+}
+
 // teardown stops the heartbeat and closes the current connection.
 func (c *TunnelClient) teardown() {
 	c.mu.Lock()
@@ -250,6 +262,10 @@ func (c *TunnelClient) runHeartbeat(ctx context.Context) {
 
 			if err != nil {
 				c.logger.Warn("agent: heartbeat failed", "error", err)
+				select {
+				case c.disconnectCh <- struct{}{}:
+				default:
+				}
 				return
 			}
 
