@@ -21,25 +21,19 @@ RUN CGO_ENABLED=0 GOOS=linux go build \
     -o /atlax-relay ./cmd/relay/
 
 # Stage 2: Runtime
-FROM alpine:3.23
+# Distroless: no shell, no package manager, minimal attack surface.
+FROM gcr.io/distroless/static-debian12:nonroot
 
 LABEL org.opencontainers.image.title="atlax-relay"
-LABEL org.opencontainers.image.description="atlax relay server - custom reverse TLS tunnel with TCP stream multiplexing"
+LABEL org.opencontainers.image.description="atlax relay server - reverse TLS tunnel with TCP stream multiplexing"
 LABEL org.opencontainers.image.source="https://github.com/atlasshare/atlax"
 LABEL org.opencontainers.image.licenses="Apache-2.0"
 
-RUN apk upgrade --no-cache \
-    && apk add --no-cache ca-certificates tzdata \
-    && addgroup -g 10001 -S atlax \
-    && adduser -u 10001 -S -G atlax -h /nonexistent -s /sbin/nologin atlax
-
+COPY --from=builder /etc/ssl/certs/ca-certificates.crt /etc/ssl/certs/
 COPY --from=builder /atlax-relay /atlax-relay
 
-USER atlax
+USER nonroot:nonroot
 
-EXPOSE 8443
-
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD ["/atlax-relay", "--healthcheck"]
+EXPOSE 8443 9090
 
 ENTRYPOINT ["/atlax-relay"]
