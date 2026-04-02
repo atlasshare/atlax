@@ -16,6 +16,7 @@ import (
 type PortRouter struct {
 	registry AgentRegistry
 	logger   *slog.Logger
+	metrics  *Metrics // optional, nil = no metrics
 
 	mu      sync.RWMutex
 	portMap map[int]portEntry // port -> customer+service
@@ -32,6 +33,9 @@ type portEntry struct {
 
 // Compile-time interface check.
 var _ TrafficRouter = (*PortRouter)(nil)
+
+// SetMetrics attaches Prometheus metrics to the router.
+func (r *PortRouter) SetMetrics(m *Metrics) { r.metrics = m }
 
 // NewPortRouter creates a router with the given registry.
 func NewPortRouter(registry AgentRegistry, logger *slog.Logger) *PortRouter {
@@ -94,6 +98,9 @@ func (r *PortRouter) Route(
 
 	// Enforce per-customer stream limit before opening.
 	if maxStreams > 0 && conn.Muxer().NumStreams() >= maxStreams {
+		if r.metrics != nil {
+			r.metrics.ClientRejected(customerID, "stream_limit")
+		}
 		return fmt.Errorf("relay: route: %w: customer %s has %d/%d streams",
 			ErrStreamLimitExceeded, customerID, conn.Muxer().NumStreams(), maxStreams)
 	}
@@ -112,6 +119,11 @@ func (r *PortRouter) Route(
 	stream, err := mux.OpenStreamWithPayload(ctx, payload)
 	if err != nil {
 		return fmt.Errorf("relay: route: open stream: %w", err)
+	}
+
+	if r.metrics != nil {
+		r.metrics.StreamOpened(customerID)
+		defer r.metrics.StreamClosed(customerID)
 	}
 
 	// Bidirectional copy between client TCP and mux stream.
