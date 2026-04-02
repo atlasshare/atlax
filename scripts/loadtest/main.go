@@ -87,7 +87,7 @@ func newMuxPair(maxStreams int) (relay, agent *protocol.MuxSession, cleanup func
 	return
 }
 
-func startEchoServer() (net.Listener, func()) {
+func startEchoServer() (ln net.Listener, cleanup func()) {
 	ln, err := net.Listen("tcp", "127.0.0.1:0")
 	if err != nil {
 		panic(err)
@@ -100,7 +100,7 @@ func startEchoServer() (net.Listener, func()) {
 			}
 			go func() {
 				defer conn.Close()
-				io.Copy(conn, conn)
+				io.Copy(conn, conn) //nolint:errcheck // echo server, errors not actionable
 			}()
 		}
 	}()
@@ -122,8 +122,8 @@ func startAgentForwarder(ctx context.Context, agentMux *protocol.MuxSession, ech
 				defer local.Close()
 				defer s.Close()
 				done := make(chan struct{}, 2)
-				go func() { io.Copy(local, s); done <- struct{}{} }()
-				go func() { io.Copy(s, local); done <- struct{}{} }()
+				go func() { io.Copy(local, s); done <- struct{}{} }() //nolint:errcheck // forwarder, errors not actionable
+				go func() { io.Copy(s, local); done <- struct{}{} }() //nolint:errcheck // forwarder, errors not actionable
 				select {
 				case <-done:
 				case <-ctx.Done():
@@ -193,7 +193,7 @@ func runLoad() {
 	wg.Wait()
 	elapsed := time.Since(start)
 
-	printResult("load", ok.Load(), fail.Load(), elapsed, 0, nil)
+	printResult("load", ok.Load(), fail.Load(), elapsed)
 }
 
 // runStress: push beyond limits to find the breaking point.
@@ -474,7 +474,7 @@ func echoRoundTrip(ctx context.Context, mux *protocol.MuxSession, msg []byte) er
 	return nil
 }
 
-func printResult(name string, ok, fail int64, elapsed time.Duration, avgLat time.Duration, latencies []float64) {
+func printResult(name string, ok, fail int64, elapsed time.Duration) {
 	total := ok + fail
 	errRate := float64(fail) / float64(total) * 100
 
