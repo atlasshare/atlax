@@ -43,10 +43,11 @@ func (f *Forwarder) Forward(
 	target string,
 ) error {
 	dialer := &net.Dialer{Timeout: f.config.DialTimeout}
-	local, err := dialer.DialContext(ctx, "tcp", target)
+	rawLocal, err := dialer.DialContext(ctx, "tcp", target)
 	if err != nil {
 		return fmt.Errorf("forwarder: dial %s: %w", target, err)
 	}
+	local := newIdleConn(rawLocal, f.config.IdleTimeout)
 
 	var wg sync.WaitGroup
 	var firstErr error
@@ -80,7 +81,7 @@ func (f *Forwarder) Forward(
 			setErr(cpErr)
 		}
 		// Half-close the write side to signal EOF to the local service.
-		if tc, ok := local.(*net.TCPConn); ok {
+		if tc, ok := rawLocal.(*net.TCPConn); ok {
 			tc.CloseWrite() //nolint:errcheck // best-effort half-close
 		}
 	}()
