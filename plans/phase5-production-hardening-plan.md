@@ -2,7 +2,7 @@
 
 **Objective:** Make atlax production-ready. Wire observability into the runtime, add automatic agent reconnection, enforce idle timeouts, prevent stream ID exhaustion, validate certificate rotation, and load test to 1000+ concurrent streams. After this phase, both binaries are deployable to production with confidence.
 
-**Status:** NOT STARTED
+**Status:** ALL STEPS COMPLETE
 **Target duration:** 2-3 weeks
 **Estimated sessions:** 5-8
 
@@ -339,12 +339,12 @@ Same as previous phases. All mutations recorded with timestamp and rationale.
 
 | Step | Status | PR | Date |
 |------|--------|----|------|
-| Step 1: Metrics + health + rate config | NOT STARTED | -- | -- |
-| Step 2: Reconnection supervision | NOT STARTED | -- | -- |
-| Step 3: IdleTimeout | NOT STARTED | -- | -- |
-| Step 4: Stream ID recycling | NOT STARTED | -- | -- |
-| Step 5: Cert rotation test | NOT STARTED | -- | -- |
-| Step 6: Load testing + ship | NOT STARTED | -- | -- |
+| Step 1: Metrics + health + rate config | COMPLETED | #54 | 2026-04-02 |
+| Step 2: Reconnection supervision | COMPLETED | #55 | 2026-04-02 |
+| Step 3: IdleTimeout | COMPLETED | #56 | 2026-04-02 |
+| Step 4: Stream ID recycling | COMPLETED | #57 | 2026-04-02 |
+| Step 5: Cert rotation test | COMPLETED | #58 | 2026-04-02 |
+| Step 6: Load testing + ship | COMPLETED | #59 | 2026-04-02 |
 
 ---
 
