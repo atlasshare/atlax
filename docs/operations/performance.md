@@ -2,15 +2,20 @@
 
 ## Overview
 
-atlax includes a comprehensive in-process performance test suite that exercises the full protocol stack: stream multiplexing, bidirectional data transfer, flow control, and resource cleanup. Tests run without external infrastructure -- the relay and agent MuxSessions are connected via `net.Pipe` with an echo server as the local service.
+atlax includes a comprehensive performance test suite with two modes:
+
+- **In-process mode** (default): relay and agent MuxSessions connected via `net.Pipe` with an echo server. Measures the **protocol ceiling** -- the maximum the mux layer can deliver without network overhead.
+- **Remote mode** (`--remote`): connects to a live relay over real TCP. Measures **actual production performance** including network latency, TLS overhead, and service response time.
 
 ## Running the Tests
 
+### In-Process (protocol benchmarks)
+
 ```bash
-# Run all benchmarks
+# All benchmarks
 go run ./scripts/loadtest/
 
-# Run a specific benchmark
+# Specific benchmark
 go run ./scripts/loadtest/ -bench load
 go run ./scripts/loadtest/ -bench stress
 go run ./scripts/loadtest/ -bench throughput
@@ -18,9 +23,100 @@ go run ./scripts/loadtest/ -bench latency
 go run ./scripts/loadtest/ -bench churn
 go run ./scripts/loadtest/ -bench ramp
 
-# Run with race detector (slower but catches data races)
+# With race detector
 go run -race ./scripts/loadtest/ -bench load
 ```
+
+### Remote (production benchmarks)
+
+Requires a running relay+agent deployment. See [Setup and Testing Guide](setup-and-testing.md).
+
+```bash
+# Load test against live relay (1000 concurrent TCP connections)
+go run ./scripts/loadtest/ -remote 18.207.237.252:18080 -bench load
+
+# Latency profile at various concurrency levels
+go run ./scripts/loadtest/ -remote 18.207.237.252:18080 -bench latency
+
+# Ramp test: find the throughput curve
+go run ./scripts/loadtest/ -remote 18.207.237.252:18080 -bench ramp
+
+# All remote-compatible benchmarks
+go run ./scripts/loadtest/ -remote 18.207.237.252:18080
+```
+
+Replace `18.207.237.252:18080` with your relay's public IP and customer port.
+
+**Which benchmarks work in remote mode:**
+
+| Benchmark | In-process | Remote | Notes |
+|-----------|:----------:|:------:|-------|
+| load | Yes | Yes | 1000 concurrent TCP connections to relay port |
+| latency | Yes | Yes | p50/p95/p99 at 1-500 concurrency |
+| ramp | Yes | Yes | throughput curve at 10-500 concurrency |
+| stress | Yes | No | would DoS the relay; in-process only |
+| throughput | Yes | No | requires mux-level stream access |
+| churn | Yes | No | requires mux-level stream access |
+
+### How to Run a Production Benchmark
+
+**Step 1: Ensure the deployment is running**
+
+```bash
+# Verify relay is accepting connections
+nc -zv <RELAY_IP> 18080
+
+# Verify the tunnel works
+curl http://<RELAY_IP>:18080
+```
+
+**Step 2: Run the remote load test**
+
+```bash
+go run ./scripts/loadtest/ -remote <RELAY_IP>:18080 -bench load
+```
+
+This opens 1000 concurrent TCP connections to the relay port. Each connection sends 1KB, reads the response, and closes. The result shows total time, throughput, and error rate.
+
+**Step 3: Run the latency profile**
+
+```bash
+go run ./scripts/loadtest/ -remote <RELAY_IP>:18080 -bench latency
+```
+
+Measures round-trip latency at concurrency levels 1, 10, 50, 100, 500. Shows p50/p95/p99/max. This reveals how your network latency + TLS + tunnel overhead scale under load.
+
+**Step 4: Run the ramp test**
+
+```bash
+go run ./scripts/loadtest/ -remote <RELAY_IP>:18080 -bench ramp
+```
+
+Gradually increases concurrency from 10 to 500. Shows the throughput curve and where performance degrades. Useful for capacity planning.
+
+**Step 5: Compare with in-process baseline**
+
+```bash
+go run ./scripts/loadtest/ -bench load
+```
+
+The difference between remote and in-process results is the overhead of: network RTT + TLS handshake + TCP congestion + service response time.
+
+### Interpreting Remote Results
+
+Remote results will be significantly different from in-process:
+
+| Factor | In-process | Remote (LAN) | Remote (Internet) |
+|--------|-----------|-------------|-------------------|
+| Latency | sub-ms | 1-5ms | 20-200ms |
+| Throughput | 10,000+ streams/sec | 1,000-5,000 | 100-1,000 |
+| Error rate | 0% | 0% | 0-2% (network) |
+
+**If remote error rate is high:**
+- Check AWS security group allows the port
+- Check agent is connected (`curl http://<IP>:<PORT>`)
+- Check relay logs for stream limit rejections
+- Reduce concurrency and retry
 
 ## Benchmark Descriptions
 

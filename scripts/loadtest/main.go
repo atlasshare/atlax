@@ -1,19 +1,21 @@
 // loadtest is a comprehensive performance test suite for atlax.
 //
-// It runs in-process using the actual protocol library -- no external
-// relay or agent needed. A relay MuxSession and agent MuxSession are
-// connected via net.Pipe, and an echo server simulates the local service.
+// Two modes:
+//
+// In-process mode (default): relay and agent MuxSessions connected via
+// net.Pipe with an echo server. Measures the protocol ceiling.
+//
+// Remote mode (--remote): connects to a live relay's client port over
+// real TCP. Measures actual production performance including network
+// latency, TLS overhead, and service response time.
 //
 // Usage:
 //
-//	go run ./scripts/loadtest/                         # run all benchmarks
-//	go run ./scripts/loadtest/ -bench load             # run only the load test
-//	go run ./scripts/loadtest/ -bench stress           # run only the stress test
-//	go run ./scripts/loadtest/ -bench throughput       # run only the throughput test
-//	go run ./scripts/loadtest/ -bench latency          # run only the latency test
-//	go run ./scripts/loadtest/ -bench churn            # run only the churn test
-//	go run ./scripts/loadtest/ -bench ramp             # run only the ramp test
-//	go run -race ./scripts/loadtest/ -bench load       # with race detector
+//	go run ./scripts/loadtest/                                          # all in-process benchmarks
+//	go run ./scripts/loadtest/ -bench load                              # specific benchmark
+//	go run ./scripts/loadtest/ -remote 18.207.237.252:18080 -bench load # against live relay
+//	go run ./scripts/loadtest/ -remote 18.207.237.252:18080 -bench ramp # ramp test against production
+//	go run -race ./scripts/loadtest/ -bench load                        # with race detector
 
 package main
 
@@ -33,20 +35,33 @@ import (
 	"github.com/atlasshare/atlax/pkg/protocol"
 )
 
+var remoteAddr string
+
 func main() {
-	bench := flag.String("bench", "all", "benchmark to run: all, load, stress, throughput, latency, churn, ramp")
+	bench := flag.String("bench", "all", "benchmark: all, load, stress, throughput, latency, churn, ramp")
+	remote := flag.String("remote", "", "remote relay address (e.g., 18.207.237.252:18080) for production benchmarking")
 	flag.Parse()
 
-	fmt.Fprintf(os.Stderr, "atlax performance test suite\n")
-	fmt.Fprintf(os.Stderr, "============================\n\n")
+	remoteAddr = *remote
+
+	if remoteAddr != "" {
+		fmt.Fprintf(os.Stderr, "atlax performance test suite (REMOTE: %s)\n", remoteAddr)
+	} else {
+		fmt.Fprintf(os.Stderr, "atlax performance test suite (IN-PROCESS)\n")
+	}
+	fmt.Fprintf(os.Stderr, "============================================\n\n")
 
 	switch *bench {
 	case "all":
 		runLoad()
-		runStress()
-		runThroughput()
+		if remoteAddr == "" {
+			runStress()
+			runThroughput()
+		}
 		runLatency()
-		runChurn()
+		if remoteAddr == "" {
+			runChurn()
+		}
 		runRamp()
 	case "load":
 		runLoad()
@@ -155,15 +170,51 @@ func percentile(sorted []float64, p float64) float64 {
 	return sorted[idx]
 }
 
+// --- Remote TCP round-trip (production mode) ---
+
+// remoteTCPRoundTrip connects to the relay's client port, sends msg,
+// reads the echo response, and closes. This exercises the full
+// production path: client TCP -> relay -> mux -> agent -> local service.
+func remoteTCPRoundTrip(ctx context.Context, addr string, msg []byte) error {
+	dialer := &net.Dialer{Timeout: 5 * time.Second}
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
+	if err != nil {
+		return err
+	}
+	defer conn.Close()
+
+	// Set deadline for the entire round-trip
+	conn.SetDeadline(time.Now().Add(10 * time.Second)) //nolint:errcheck // best-effort
+
+	if _, err := conn.Write(msg); err != nil {
+		return err
+	}
+
+	// For HTTP services, read whatever comes back (we don't know exact size).
+	// For echo services, read exactly len(msg).
+	buf := make([]byte, len(msg)+4096)
+	n, err := conn.Read(buf)
+	if err != nil && err != io.EOF {
+		return err
+	}
+	if n == 0 {
+		return fmt.Errorf("empty response")
+	}
+	return nil
+}
+
 // --- Benchmarks ---
 
-// runLoad: sustained concurrent streams at target capacity.
-// Target: 1000 concurrent streams, 1KB messages, <1% error rate.
 func runLoad() {
 	const streams = 1000
 	const msgSize = 1024
 
 	fmt.Fprintf(os.Stderr, "[load] %d concurrent streams, %d bytes each\n", streams, msgSize)
+
+	if remoteAddr != "" {
+		runRemoteLoad(streams, msgSize)
+		return
+	}
 
 	echoLn, echoCleanup := startEchoServer()
 	defer echoCleanup()
@@ -196,16 +247,44 @@ func runLoad() {
 	printResult("load", ok.Load(), fail.Load(), elapsed)
 }
 
-// runStress: push beyond limits to find the breaking point.
-// Opens streams in batches of 500 until errors exceed 5%.
+func runRemoteLoad(streams, msgSize int) {
+	msg := makePayload(msgSize)
+	var wg sync.WaitGroup
+	var ok, fail atomic.Int64
+
+	ctx, cancel := context.WithTimeout(context.Background(), 60*time.Second)
+	defer cancel()
+
+	start := time.Now()
+	for range streams {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := remoteTCPRoundTrip(ctx, remoteAddr, msg); err != nil {
+				fail.Add(1)
+			} else {
+				ok.Add(1)
+			}
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	printResult("load/remote", ok.Load(), fail.Load(), elapsed)
+}
+
 func runStress() {
+	if remoteAddr != "" {
+		fmt.Fprintf(os.Stderr, "[stress] skipped in remote mode (would DoS the relay)\n\n")
+		return
+	}
+
 	fmt.Fprintf(os.Stderr, "[stress] finding breaking point (batches of 500)\n")
 
 	echoLn, echoCleanup := startEchoServer()
 	defer echoCleanup()
 
 	msg := makePayload(512)
-	batchSize := 500
 
 	for n := 500; n <= 5000; n += 500 {
 		relayMux, agentMux, muxCleanup := newMuxPair(n + 200)
@@ -238,18 +317,21 @@ func runStress() {
 			n, ok.Load(), fail.Load(), errRate, elapsed.Round(time.Millisecond))
 
 		if errRate > 5 {
-			fmt.Fprintf(os.Stderr, "[stress] breaking point: ~%d streams (>5%% error rate)\n\n", n-batchSize)
+			fmt.Fprintf(os.Stderr, "[stress] breaking point: ~%d streams (>5%% error rate)\n\n", n-500)
 			return
 		}
 	}
 	fmt.Fprintf(os.Stderr, "[stress] no breaking point found up to 5000 streams\n\n")
 }
 
-// runThroughput: max bytes/sec through the tunnel with a single stream.
-// Sends 100MB through one stream and measures transfer rate.
 func runThroughput() {
-	const totalBytes = 100 * 1024 * 1024 // 100MB
-	const chunkSize = 32 * 1024          // 32KB chunks
+	if remoteAddr != "" {
+		fmt.Fprintf(os.Stderr, "[throughput] skipped in remote mode (requires mux-level stream access)\n\n")
+		return
+	}
+
+	const totalBytes = 100 * 1024 * 1024
+	const chunkSize = 32 * 1024
 
 	fmt.Fprintf(os.Stderr, "[throughput] %d MB through single stream (%d KB chunks)\n",
 		totalBytes/1024/1024, chunkSize/1024)
@@ -272,7 +354,6 @@ func runThroughput() {
 	chunk := makePayload(chunkSize)
 	sent := 0
 
-	// Read in background
 	readDone := make(chan int64, 1)
 	go func() {
 		var total int64
@@ -305,16 +386,20 @@ func runThroughput() {
 	fmt.Fprintf(os.Stderr, "[throughput] rate: %.1f MB/sec\n\n", mbps)
 }
 
-// runLatency: per-stream latency at various concurrency levels.
-// Measures p50, p95, p99 latency at 1, 10, 50, 100, 500 concurrent streams.
 func runLatency() {
 	fmt.Fprintf(os.Stderr, "[latency] measuring p50/p95/p99 at various concurrency levels\n")
+
+	levels := []int{1, 10, 50, 100, 500}
+
+	if remoteAddr != "" {
+		runRemoteLatency(levels)
+		return
+	}
 
 	echoLn, echoCleanup := startEchoServer()
 	defer echoCleanup()
 
 	msg := makePayload(256)
-	levels := []int{1, 10, 50, 100, 500}
 
 	fmt.Fprintf(os.Stderr, "%-12s %10s %10s %10s %10s\n",
 		"concurrency", "p50", "p95", "p99", "max")
@@ -324,42 +409,77 @@ func runLatency() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		startAgentForwarder(ctx, agentMux, echoLn.Addr().String())
 
-		var wg sync.WaitGroup
-		var mu sync.Mutex
-		latencies := make([]float64, 0, n)
+		latencies := collectLatencies(n, func() error {
+			return echoRoundTrip(ctx, relayMux, msg)
+		})
 
-		for range n {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				t0 := time.Now()
-				if err := echoRoundTrip(ctx, relayMux, msg); err != nil {
-					return
-				}
-				lat := time.Since(t0).Seconds() * 1000 // ms
-				mu.Lock()
-				latencies = append(latencies, lat)
-				mu.Unlock()
-			}()
-		}
-		wg.Wait()
 		cancel()
 		muxCleanup()
 
-		sort.Float64s(latencies)
-		fmt.Fprintf(os.Stderr, "%-12d %9.1fms %9.1fms %9.1fms %9.1fms\n",
-			n,
-			percentile(latencies, 50),
-			percentile(latencies, 95),
-			percentile(latencies, 99),
-			percentile(latencies, 100))
+		printLatencyRow(n, latencies)
 	}
 	fmt.Fprintf(os.Stderr, "\n")
 }
 
-// runChurn: rapid open/close cycles. Tests stream ID recycling
-// and resource cleanup under high churn.
+func runRemoteLatency(levels []int) {
+	msg := makePayload(256)
+
+	fmt.Fprintf(os.Stderr, "%-12s %10s %10s %10s %10s\n",
+		"concurrency", "p50", "p95", "p99", "max")
+
+	for _, n := range levels {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+
+		latencies := collectLatencies(n, func() error {
+			return remoteTCPRoundTrip(ctx, remoteAddr, msg)
+		})
+
+		cancel()
+		printLatencyRow(n, latencies)
+	}
+	fmt.Fprintf(os.Stderr, "\n")
+}
+
+func collectLatencies(n int, roundTrip func() error) []float64 {
+	var wg sync.WaitGroup
+	var mu sync.Mutex
+	latencies := make([]float64, 0, n)
+
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			t0 := time.Now()
+			if err := roundTrip(); err != nil {
+				return
+			}
+			lat := time.Since(t0).Seconds() * 1000
+			mu.Lock()
+			latencies = append(latencies, lat)
+			mu.Unlock()
+		}()
+	}
+	wg.Wait()
+
+	sort.Float64s(latencies)
+	return latencies
+}
+
+func printLatencyRow(n int, latencies []float64) {
+	fmt.Fprintf(os.Stderr, "%-12d %9.1fms %9.1fms %9.1fms %9.1fms\n",
+		n,
+		percentile(latencies, 50),
+		percentile(latencies, 95),
+		percentile(latencies, 99),
+		percentile(latencies, 100))
+}
+
 func runChurn() {
+	if remoteAddr != "" {
+		fmt.Fprintf(os.Stderr, "[churn] skipped in remote mode (requires mux-level stream access)\n\n")
+		return
+	}
+
 	const cycles = 5000
 
 	fmt.Fprintf(os.Stderr, "[churn] %d rapid open/close cycles\n", cycles)
@@ -377,7 +497,6 @@ func runChurn() {
 	var ok, fail atomic.Int64
 
 	start := time.Now()
-	// Serial to test recycling under controlled conditions
 	for range cycles {
 		if err := echoRoundTrip(ctx, relayMux, msg); err != nil {
 			fail.Add(1)
@@ -387,23 +506,30 @@ func runChurn() {
 	}
 	elapsed := time.Since(start)
 
-	relayMux.NumStreams() // force read
 	fmt.Fprintf(os.Stderr, "[churn] %d ok, %d fail, %v (%.0f cycles/sec)\n",
 		ok.Load(), fail.Load(), elapsed.Round(time.Millisecond),
 		float64(ok.Load())/elapsed.Seconds())
 	fmt.Fprintf(os.Stderr, "[churn] active streams after churn: %d\n\n", relayMux.NumStreams())
 }
 
-// runRamp: gradually increase concurrency, measure throughput curve.
-// Shows how performance degrades as load increases.
 func runRamp() {
 	fmt.Fprintf(os.Stderr, "[ramp] gradual concurrency increase\n")
+
+	var levels []int
+
+	if remoteAddr != "" {
+		// Smaller levels for remote to avoid overwhelming the relay
+		levels = []int{10, 25, 50, 100, 200, 500}
+		runRemoteRamp(levels)
+		return
+	}
+
+	levels = []int{10, 25, 50, 100, 250, 500, 1000, 1500, 2000}
 
 	echoLn, echoCleanup := startEchoServer()
 	defer echoCleanup()
 
 	msg := makePayload(512)
-	levels := []int{10, 25, 50, 100, 250, 500, 1000, 1500, 2000}
 
 	fmt.Fprintf(os.Stderr, "%-12s %12s %8s %12s\n",
 		"concurrency", "streams/sec", "errors", "avg latency")
@@ -413,44 +539,74 @@ func runRamp() {
 		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 		startAgentForwarder(ctx, agentMux, echoLn.Addr().String())
 
-		var wg sync.WaitGroup
-		var ok, fail atomic.Int64
-		var totalLat atomic.Int64
+		okN, failN, avgLat := runConcurrent(n, func() error {
+			return echoRoundTrip(ctx, relayMux, msg)
+		})
 
-		start := time.Now()
-		for range n {
-			wg.Add(1)
-			go func() {
-				defer wg.Done()
-				t0 := time.Now()
-				if err := echoRoundTrip(ctx, relayMux, msg); err != nil {
-					fail.Add(1)
-				} else {
-					ok.Add(1)
-					totalLat.Add(time.Since(t0).Microseconds())
-				}
-			}()
-		}
-		wg.Wait()
-		elapsed := time.Since(start)
 		cancel()
 		muxCleanup()
 
-		okN := ok.Load()
-		var avgLat time.Duration
-		if okN > 0 {
-			avgLat = time.Duration(totalLat.Load()/okN) * time.Microsecond
-		}
-
-		fmt.Fprintf(os.Stderr, "%-12d %11.0f/s %7d %11v\n",
-			n, float64(okN)/elapsed.Seconds(), fail.Load(), avgLat.Round(time.Microsecond))
+		printRampRow(n, okN, failN, avgLat)
 	}
 	fmt.Fprintf(os.Stderr, "\n")
 }
 
+func runRemoteRamp(levels []int) {
+	msg := makePayload(512)
+
+	fmt.Fprintf(os.Stderr, "%-12s %12s %8s %12s\n",
+		"concurrency", "reqs/sec", "errors", "avg latency")
+
+	for _, n := range levels {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+
+		okN, failN, avgLat := runConcurrent(n, func() error {
+			return remoteTCPRoundTrip(ctx, remoteAddr, msg)
+		})
+
+		cancel()
+		printRampRow(n, okN, failN, avgLat)
+	}
+	fmt.Fprintf(os.Stderr, "\n")
+}
+
+func runConcurrent(n int, roundTrip func() error) (ok, fail int64, avgLat time.Duration) {
+	var wg sync.WaitGroup
+	var okA, failA atomic.Int64
+	var totalLat atomic.Int64
+
+	start := time.Now()
+	for range n {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			t0 := time.Now()
+			if err := roundTrip(); err != nil {
+				failA.Add(1)
+			} else {
+				okA.Add(1)
+				totalLat.Add(time.Since(t0).Microseconds())
+			}
+		}()
+	}
+	wg.Wait()
+	elapsed := time.Since(start)
+
+	okN := okA.Load()
+	if okN > 0 {
+		avgLat = time.Duration(totalLat.Load()/okN) * time.Microsecond
+	}
+	_ = elapsed
+	return okN, failA.Load(), avgLat
+}
+
+func printRampRow(n int, ok, fail int64, avgLat time.Duration) {
+	fmt.Fprintf(os.Stderr, "%-12d %11d ok %7d %11v\n",
+		n, ok, fail, avgLat.Round(time.Microsecond))
+}
+
 // --- Helpers ---
 
-// echoRoundTrip opens a stream, writes msg, reads the echo, closes.
 func echoRoundTrip(ctx context.Context, mux *protocol.MuxSession, msg []byte) error {
 	s, err := mux.OpenStream(ctx)
 	if err != nil {
