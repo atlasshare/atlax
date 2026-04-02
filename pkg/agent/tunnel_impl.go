@@ -50,22 +50,58 @@ func NewTunnel(
 }
 
 // Start begins accepting streams from the relay and forwarding them
-// to local services. Blocks until ctx is canceled or an error occurs.
+// to local services. If the connection drops, it automatically
+// reconnects and resumes. Blocks until ctx is canceled.
 func (t *TunnelRunner) Start(ctx context.Context) error {
-	acceptCtx, cancel := context.WithCancel(ctx)
 	t.mu.Lock()
-	t.cancelAccept = cancel
 	t.startTime = time.Now()
 	t.acceptStopped = make(chan struct{})
 	t.mu.Unlock()
 
 	defer close(t.acceptStopped)
-	defer cancel()
 
 	tc, ok := t.client.(*TunnelClient)
 	if !ok {
 		return fmt.Errorf("tunnel: client does not expose Mux()")
 	}
+
+	for {
+		err := t.acceptLoop(ctx, tc)
+		if ctx.Err() != nil {
+			return nil // clean shutdown
+		}
+		if err != nil {
+			t.logger.Warn("tunnel: accept loop exited", "error", err)
+		}
+
+		// Wait for disconnect signal or context cancellation.
+		select {
+		case <-ctx.Done():
+			return nil
+		case <-tc.DisconnectCh():
+			t.logger.Info("tunnel: heartbeat disconnect, reconnecting")
+		default:
+			// Accept loop exited without heartbeat signal (e.g., read error).
+			// Short pause before reconnecting.
+			t.logger.Info("tunnel: connection lost, reconnecting")
+		}
+
+		if reconnErr := tc.Reconnect(ctx); reconnErr != nil {
+			return fmt.Errorf("tunnel: reconnect failed: %w", reconnErr)
+		}
+		t.logger.Info("tunnel: reconnected to relay")
+	}
+}
+
+// acceptLoop runs the stream accept + forward loop on the current mux.
+// Returns when the mux closes or ctx is canceled.
+func (t *TunnelRunner) acceptLoop(ctx context.Context, tc *TunnelClient) error {
+	acceptCtx, cancel := context.WithCancel(ctx)
+	defer cancel()
+
+	t.mu.Lock()
+	t.cancelAccept = cancel
+	t.mu.Unlock()
 
 	mux := tc.Mux()
 	if mux == nil {
@@ -78,7 +114,7 @@ func (t *TunnelRunner) Start(ctx context.Context) error {
 		stream, err := mux.AcceptStream(acceptCtx)
 		if err != nil {
 			if acceptCtx.Err() != nil {
-				return nil // clean shutdown
+				return nil
 			}
 			return fmt.Errorf("tunnel: accept stream: %w", err)
 		}
@@ -88,7 +124,7 @@ func (t *TunnelRunner) Start(ctx context.Context) error {
 			t.logger.Warn("tunnel: no service mapping for stream",
 				"stream_id", stream.ID())
 			if ss, streamOk := stream.(*protocol.StreamSession); streamOk {
-				ss.Reset(1) // error code 1: no such service
+				ss.Reset(1)
 			}
 			continue
 		}
