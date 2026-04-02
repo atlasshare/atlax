@@ -832,3 +832,103 @@ func TestMuxSession_FullStreamLifecycle(t *testing.T) {
 	assert.Equal(t, 0, relay.NumStreams())
 	assert.Equal(t, 0, agent.NumStreams())
 }
+
+// --- Stream ID recycling tests ---
+
+func TestMuxSession_StreamIDRecycling(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Open a stream
+	s1, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+	id1 := s1.ID()
+
+	agentS1, err := agent.AcceptStream(ctx)
+	require.NoError(t, err)
+
+	// Close both sides so stream reaches Closed state
+	s1.Close()
+	time.Sleep(100 * time.Millisecond)
+	agentS1.Close()
+	time.Sleep(200 * time.Millisecond)
+
+	// Open a new stream -- should reuse id1
+	s2, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+
+	assert.Equal(t, id1, s2.ID(), "recycled stream should reuse the closed ID")
+
+	_, err = agent.AcceptStream(ctx)
+	require.NoError(t, err)
+}
+
+func TestMuxSession_StreamIDRecyclingPreservesParity(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Open 3 streams from relay (odd IDs: 1, 3, 5)
+	ids := make([]uint32, 0, 3)
+	for range 3 {
+		s, err := relay.OpenStream(ctx)
+		require.NoError(t, err)
+		ids = append(ids, s.ID())
+		_, err = agent.AcceptStream(ctx)
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, uint32(1), ids[0])
+	assert.Equal(t, uint32(3), ids[1])
+	assert.Equal(t, uint32(5), ids[2])
+
+	// Close all via relay side
+	relay.mu.Lock()
+	for _, s := range relay.streams {
+		s.Close()
+	}
+	relay.mu.Unlock()
+	time.Sleep(300 * time.Millisecond)
+
+	// Open new streams -- should recycle in LIFO order (5, 3, 1)
+	s1, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+	_, err = agent.AcceptStream(ctx)
+	require.NoError(t, err)
+
+	// Recycled ID should be odd (relay parity preserved)
+	assert.Equal(t, uint32(1), s1.ID()%2, "recycled ID should be odd for relay")
+}
+
+func TestMuxSession_StreamIDHighChurn(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer cancel()
+
+	// Open and close 20 streams with both sides closing -- verify recycling
+	for i := range 20 {
+		s, err := relay.OpenStream(ctx)
+		require.NoError(t, err, "iteration %d", i)
+
+		as, err := agent.AcceptStream(ctx)
+		require.NoError(t, err, "iteration %d accept", i)
+
+		s.Close()
+		time.Sleep(50 * time.Millisecond)
+		as.Close()
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	// With recycling, nextStreamID should be much less than 40
+	// (without recycling: 1, 3, 5, ..., 39 = nextStreamID 41)
+	relay.mu.Lock()
+	nextID := relay.nextStreamID
+	relay.mu.Unlock()
+
+	assert.Less(t, nextID, uint32(40),
+		"with recycling, nextStreamID should not reach 40 after 20 cycles")
+}

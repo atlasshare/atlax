@@ -33,6 +33,7 @@ type MuxSession struct {
 	mu           sync.Mutex
 	streams      map[uint32]*StreamSession
 	nextStreamID uint32
+	freeIDs      []uint32 // recycled stream IDs from closed streams
 	acceptCh     chan *StreamSession
 	closeCh      chan struct{}
 	closeOnce    sync.Once
@@ -104,8 +105,14 @@ func (m *MuxSession) OpenStreamWithPayload(ctx context.Context, payload []byte) 
 		return nil, fmt.Errorf("mux: open stream: %w", ErrMaxStreamsExceeded)
 	}
 
-	id := m.nextStreamID
-	m.nextStreamID += 2
+	var id uint32
+	if len(m.freeIDs) > 0 {
+		id = m.freeIDs[len(m.freeIDs)-1]
+		m.freeIDs = m.freeIDs[:len(m.freeIDs)-1]
+	} else {
+		id = m.nextStreamID
+		m.nextStreamID += 2
+	}
 
 	s := NewStreamSession(id, StreamConfig{
 		InitialWindowSize: m.config.InitialStreamWindow,
@@ -435,6 +442,7 @@ func (m *MuxSession) handleStreamReset(f *Frame) {
 
 	m.mu.Lock()
 	delete(m.streams, f.StreamID)
+	m.freeIDs = append(m.freeIDs, f.StreamID)
 	m.mu.Unlock()
 }
 
@@ -493,11 +501,13 @@ func (m *MuxSession) handleGoAway(_ *Frame) {
 	m.goingAway.Store(true)
 }
 
-// maybeRemoveStream removes a stream from the map if it is fully closed.
+// maybeRemoveStream removes a stream from the map if it is fully closed
+// and recycles the stream ID for reuse.
 func (m *MuxSession) maybeRemoveStream(id uint32, s *StreamSession) {
 	if s.State() == StateClosed || s.State() == StateReset {
 		m.mu.Lock()
 		delete(m.streams, id)
+		m.freeIDs = append(m.freeIDs, id)
 		m.mu.Unlock()
 	}
 }
@@ -508,6 +518,7 @@ func (m *MuxSession) removeStream(id uint32) {
 	if s, ok := m.streams[id]; ok {
 		s.Reset(0)
 		delete(m.streams, id)
+		m.freeIDs = append(m.freeIDs, id)
 	}
 	m.mu.Unlock()
 }
