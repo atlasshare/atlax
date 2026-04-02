@@ -83,21 +83,7 @@ func (cl *ClientListener) handleClient(
 	conn net.Conn,
 	port int,
 ) {
-	// Rate limit by source IP.
-	if cl.rateLimiter != nil {
-		ip, _, err := net.SplitHostPort(conn.RemoteAddr().String())
-		if err != nil {
-			ip = conn.RemoteAddr().String()
-		}
-		if !cl.rateLimiter.Allow(ip) {
-			cl.logger.Warn("relay: rate limited",
-				"port", port,
-				"remote_addr", conn.RemoteAddr())
-			conn.Close()
-			return
-		}
-	}
-
+	// Look up customer first so we can tag metrics.
 	customerID, _, ok := cl.router.LookupPort(port)
 	if !ok {
 		cl.logger.Warn("relay: no mapping for client port",
@@ -105,6 +91,25 @@ func (cl *ClientListener) handleClient(
 			"remote_addr", conn.RemoteAddr())
 		conn.Close()
 		return
+	}
+
+	// Rate limit by source IP.
+	if cl.rateLimiter != nil {
+		ip, _, splitErr := net.SplitHostPort(conn.RemoteAddr().String())
+		if splitErr != nil {
+			ip = conn.RemoteAddr().String()
+		}
+		if !cl.rateLimiter.Allow(ip) {
+			if cl.router.metrics != nil {
+				cl.router.metrics.ClientRejected(customerID, "rate_limited")
+			}
+			cl.logger.Warn("relay: rate limited",
+				"port", port,
+				"customer_id", customerID,
+				"remote_addr", conn.RemoteAddr())
+			conn.Close()
+			return
+		}
 	}
 
 	if err := cl.router.Route(ctx, customerID, conn, port); err != nil {

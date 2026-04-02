@@ -41,11 +41,18 @@ type TLSPaths struct {
 
 // CustomerConfig defines per-customer port allocations and resource limits.
 type CustomerConfig struct {
-	ID               string       `yaml:"id"`
-	Ports            []PortConfig `yaml:"ports"`
-	MaxConnections   int          `yaml:"max_connections"`
-	MaxStreams       int          `yaml:"max_streams"`
-	MaxBandwidthMbps int          `yaml:"max_bandwidth_mbps"`
+	ID               string          `yaml:"id"`
+	Ports            []PortConfig    `yaml:"ports"`
+	MaxConnections   int             `yaml:"max_connections"`
+	MaxStreams       int             `yaml:"max_streams"`
+	MaxBandwidthMbps int             `yaml:"max_bandwidth_mbps"`
+	RateLimit        RateLimitConfig `yaml:"rate_limit"`
+}
+
+// RateLimitConfig controls per-customer rate limiting on client connections.
+type RateLimitConfig struct {
+	RequestsPerSecond float64 `yaml:"requests_per_second"` // 0 = no limit
+	Burst             int     `yaml:"burst"`
 }
 
 // PortConfig maps a relay-side port to a named service for a customer.

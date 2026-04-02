@@ -10,6 +10,8 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
+
 	"github.com/atlasshare/atlax/internal/audit"
 	"github.com/atlasshare/atlax/internal/config"
 	"github.com/atlasshare/atlax/pkg/auth"
@@ -61,8 +63,12 @@ func run() error {
 		return fmt.Errorf("create TLS config: %w", err)
 	}
 
+	// Create metrics
+	metrics := relay.NewMetrics("atlax", prometheus.DefaultRegisterer)
+
 	// Create components
 	registry := relay.NewMemoryRegistry(logger)
+	registry.SetMetrics(metrics)
 
 	agentListener := relay.NewAgentListener(relay.AgentListenerConfig{
 		Addr:      cfg.Server.ListenAddr,
@@ -74,6 +80,7 @@ func run() error {
 	})
 
 	router := relay.NewPortRouter(registry, logger)
+	router.SetMetrics(metrics)
 	clientListener := relay.NewClientListener(relay.ClientListenerConfig{Router: router, Logger: logger})
 
 	server := relay.NewRelay(relay.ServerDeps{
@@ -96,6 +103,16 @@ func run() error {
 		Target:    cfg.Server.ListenAddr,
 		Timestamp: time.Now(),
 	})
+
+	// Start admin server (health check + metrics)
+	if cfg.Server.AdminAddr != "" {
+		admin := relay.NewAdminServer(cfg.Server.AdminAddr, registry, logger)
+		go func() {
+			if adminErr := admin.Start(ctx); adminErr != nil {
+				logger.Error("admin server error", "error", adminErr)
+			}
+		}()
+	}
 
 	serverDone := make(chan error, 1)
 	go func() {

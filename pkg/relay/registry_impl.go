@@ -22,6 +22,7 @@ type MemoryRegistry struct {
 	agents         map[string]*LiveConnection
 	customerLimits map[string]int // customerID -> max connections (0 = default 1)
 	logger         *slog.Logger
+	metrics        *Metrics // optional
 }
 
 // Compile-time interface check.
@@ -35,6 +36,9 @@ func NewMemoryRegistry(logger *slog.Logger) *MemoryRegistry {
 		logger:         logger,
 	}
 }
+
+// SetMetrics attaches Prometheus metrics to the registry.
+func (r *MemoryRegistry) SetMetrics(m *Metrics) { r.metrics = m }
 
 // SetCustomerLimit configures the maximum connections for a customer.
 // Default is 1 (replace on reconnect). Set > 1 for multi-agent.
@@ -79,6 +83,9 @@ func (r *MemoryRegistry) Register(
 		r.mu.Unlock()
 	}
 
+	if r.metrics != nil {
+		r.metrics.ConnectionRegistered(customerID)
+	}
 	r.logger.Info("relay: agent registered",
 		"customer_id", customerID,
 		"remote_addr", conn.RemoteAddr())
@@ -95,6 +102,9 @@ func (r *MemoryRegistry) Unregister(_ context.Context, customerID string) error 
 	r.mu.Unlock()
 
 	if ok {
+		if r.metrics != nil {
+			r.metrics.ConnectionUnregistered(customerID)
+		}
 		conn.Close()
 		r.logger.Info("relay: agent unregistered",
 			"customer_id", customerID)
