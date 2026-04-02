@@ -9,10 +9,27 @@ A reverse TLS tunnel with TCP stream multiplexing, built in Go. Exposes local se
 
 **Production-tested.** Both binaries work end-to-end on AWS with real Samba, web, and API traffic.
 
+---
+
+## The Problem
+
+You have a server at home or in an office running services (file shares, web apps, APIs). Your ISP uses **CGNAT** (Carrier-Grade NAT), which means your router does not have a public IP address. No one on the internet can reach your services directly -- no port forwarding, no dynamic DNS, nothing works.
+
+Traditional solutions:
+
+| Approach | Limitation |
+|----------|-----------|
+| Port forwarding | Impossible behind CGNAT -- you don't own the public IP |
+| VPN (WireGuard, Tailscale) | Requires VPN client on every device that wants to connect |
+| ngrok / Cloudflare Tunnel | Vendor lock-in, HTTP-only (no raw TCP like SMB), usage limits |
+| SSH reverse tunnel | Single service per tunnel, no multiplexing, fragile |
+
+**atlax solves this** by running an agent on your server that dials *out* to a relay with a public IP. The relay accepts incoming connections and routes them through the tunnel to your services. No inbound ports needed on your end. Any TCP service works (Samba, HTTP, databases, anything).
+
 ## How It Works
 
 ```
-Client (internet)                     Relay (VPS)                    Customer Node (behind CGNAT)
+Client (internet)                     Relay (VPS)                    Your Server (behind CGNAT)
       |                                  |                                    |
       |--- TCP to relay port 18080 ----->|                                    |
       |                                  |--- mux stream (service: http) ---->|
@@ -21,25 +38,38 @@ Client (internet)                     Relay (VPS)                    Customer No
       |<-- response ---------------------|                                    |
 ```
 
-1. The **agent** on the customer node dials out to the relay over mTLS (no inbound ports needed)
-2. The **relay** accepts client TCP connections on per-customer dedicated ports
-3. Each client connection becomes a multiplexed stream routed to the correct agent
-4. The agent forwards the stream to the matching local service
-5. Traffic flows bidirectionally until either side closes
+1. The **agent** on your server dials out to the relay over mTLS (outbound connection -- works behind any NAT)
+2. The **relay** listens on dedicated ports for each customer service
+3. When a client connects to a relay port, the relay opens a multiplexed stream inside the existing tunnel
+4. The stream carries the service name (e.g., "http") so the agent knows which local service to forward to
+5. The agent connects to the local service and copies data bidirectionally
+6. The client sees the service as if it were running on the relay's IP
+
+### Key Concepts
+
+**CGNAT (Carrier-Grade NAT):** Your ISP shares one public IP among many customers. You cannot receive inbound connections. atlax bypasses this because the agent initiates the connection outward.
+
+**mTLS (Mutual TLS):** Both the relay and agent present certificates during the TLS handshake. The relay verifies the agent is a legitimate customer. The agent verifies it is talking to the real relay. No passwords, no API keys -- identity is cryptographic.
+
+**Stream Multiplexing:** Instead of one TCP connection per client, atlax sends all client traffic over a single mTLS tunnel by splitting it into numbered streams. Stream 1 might be an SMB session, stream 3 might be an HTTP request -- all sharing one connection. This is efficient and keeps firewall rules simple (one outbound port from the agent).
+
+**Per-Customer Port Isolation:** Each customer gets their own set of relay ports. Traffic on customer A's ports can never reach customer B's agent. This is structural -- the routing code looks up the customer by port, not by any client-provided identifier.
 
 ## Features
 
-- **Reverse tunnel** -- Agent dials out, bypassing CGNAT and firewalls
-- **mTLS authentication** -- Certificate-based identity, TLS 1.3 minimum, zero-trust
-- **Stream multiplexing** -- Many client connections over a single tunnel (custom 12-byte wire protocol)
-- **Multi-service routing** -- One agent exposes multiple services (Samba, HTTP, API); relay routes by service name in STREAM_OPEN payload
-- **Multi-tenant isolation** -- Per-customer port allocation, no cross-tenant routing possible by construction
-- **Per-customer limits** -- Configurable stream limits and connection limits per customer
-- **Per-IP rate limiting** -- Token bucket rate limiter on client connections
-- **Per-port bind address** -- Bind customer ports to 127.0.0.1 for reverse proxy (Caddy/nginx) deployments
-- **Graceful shutdown** -- GOAWAY to all agents, stream draining with configurable grace period
-- **Structured audit logging** -- Async JSON event emitter for connect/disconnect/auth lifecycle
+- **Reverse tunnel** -- Agent dials out, bypassing CGNAT and firewalls. No inbound ports needed on the customer side
+- **mTLS authentication** -- Certificate-based identity with TLS 1.3 minimum. Certificate hierarchy: Root CA -> Intermediate CAs -> leaf certs with 90-day validity
+- **Stream multiplexing** -- Many client connections over a single tunnel using a custom 12-byte binary wire protocol with flow control
+- **Multi-service routing** -- One agent exposes multiple services (Samba, HTTP, API). The relay sends the service name in the STREAM_OPEN frame, and the agent routes to the correct local address
+- **Multi-tenant isolation** -- Per-customer port allocation. Cross-tenant routing is impossible by construction (proven by test)
+- **Per-customer limits** -- Configurable max streams and max connections per customer
+- **Per-IP rate limiting** -- Token bucket rate limiter rejects abusive source IPs immediately
+- **Per-port bind address** -- Bind customer ports to `127.0.0.1` so only a reverse proxy (Caddy/nginx) can reach them
+- **Graceful shutdown** -- Relay sends GOAWAY to all agents, drains active streams, then closes
+- **Structured audit logging** -- Async JSON events for connect, disconnect, auth success/failure
 - **Prometheus metrics** -- Per-customer counters for streams, connections, and rejections
+- **Heartbeat monitoring** -- Periodic PING/PONG detects dead tunnels
+- **Exponential backoff reconnection** -- Agent reconnects with jitter to avoid thundering herd
 
 ## Quick Start
 
@@ -122,7 +152,190 @@ echo "hello atlax" | nc localhost 18080
 # Output: hello atlax
 ```
 
-For cross-machine and AWS deployment, see [Setup and Testing Guide](docs/operations/setup-and-testing.md).
+## How To: Deploy on a VPS with a Real Service
+
+This example exposes a web app running on your home server through an AWS EC2 relay.
+
+### 1. Generate certificates with your relay IP
+
+Edit `scripts/gen-certs.sh` and add your VPS IP to the relay cert SAN:
+
+```bash
+subjectAltName=DNS:relay.atlax.local,DNS:localhost,IP:127.0.0.1,IP:<YOUR_VPS_IP>
+```
+
+Then regenerate:
+
+```bash
+rm -rf certs/
+make certs-dev
+```
+
+### 2. Cross-compile and deploy the relay
+
+```bash
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/atlax-relay-linux ./cmd/relay/
+scp bin/atlax-relay-linux <VPS>:~/atlax/bin/atlax-relay
+scp certs/relay.crt certs/relay.key certs/root-ca.crt certs/customer-ca.crt <VPS>:~/atlax/certs/
+```
+
+### 3. Create the relay config on the VPS
+
+```yaml
+server:
+  listen_addr: 0.0.0.0:8443
+  shutdown_grace_period: 30s
+tls:
+  cert_file: ./certs/relay.crt
+  key_file: ./certs/relay.key
+  ca_file: ./certs/root-ca.crt
+  client_ca_file: ./certs/customer-ca.crt
+customers:
+  - id: customer-dev-001
+    max_streams: 100
+    ports:
+      - port: 18080
+        service: http
+        listen_addr: 127.0.0.1
+logging:
+  level: info
+  format: json
+```
+
+### 4. Deploy the agent to your home server
+
+```bash
+GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/atlax-agent-linux ./cmd/agent/
+scp bin/atlax-agent-linux <HOME_SERVER>:~/atlax/bin/atlax-agent
+scp certs/agent.crt certs/agent.key certs/relay-ca.crt <HOME_SERVER>:~/atlax/certs/
+```
+
+### 5. Create the agent config
+
+```yaml
+relay:
+  addr: <YOUR_VPS_IP>:8443
+  server_name: relay.atlax.local
+  keepalive_interval: 30s
+  keepalive_timeout: 10s
+tls:
+  cert_file: ./certs/agent.crt
+  key_file: ./certs/agent.key
+  ca_file: ./certs/relay-ca.crt
+services:
+  - name: http
+    local_addr: 127.0.0.1:3000
+    protocol: tcp
+logging:
+  level: info
+  format: json
+```
+
+### 6. Start both and test
+
+```bash
+# On VPS:
+./bin/atlax-relay -config relay.yaml
+
+# On home server:
+./bin/atlax-agent -config agent.yaml
+
+# From anywhere:
+curl http://<YOUR_VPS_IP>:18080
+```
+
+For systemd units, Caddy reverse proxy setup, and multi-service configuration, see the [Setup and Testing Guide](docs/operations/setup-and-testing.md).
+
+## How To: Expose Multiple Services
+
+One agent can expose multiple local services. Each service gets its own relay port.
+
+**Agent config:**
+
+```yaml
+services:
+  - name: http
+    local_addr: 127.0.0.1:3000
+    protocol: tcp
+  - name: api
+    local_addr: 127.0.0.1:7070
+    protocol: tcp
+  - name: smb
+    local_addr: 127.0.0.1:445
+    protocol: tcp
+```
+
+**Relay config:**
+
+```yaml
+customers:
+  - id: customer-dev-001
+    ports:
+      - port: 18080
+        service: http
+      - port: 18070
+        service: api
+      - port: 18445
+        service: smb
+```
+
+The `service` name in the relay must exactly match the `name` in the agent. The relay sends the service name in the tunnel so the agent knows which local address to forward to. If only one service is configured, the agent routes all traffic to it regardless of the name.
+
+## How To: Put Caddy in Front (HTTPS)
+
+For production HTTP services, put Caddy in front of the relay for TLS termination and subdomain routing. Bind relay ports to `127.0.0.1` so only Caddy can reach them.
+
+**Relay config:**
+
+```yaml
+ports:
+  - port: 18080
+    service: http
+    listen_addr: 127.0.0.1   # only Caddy can reach this
+```
+
+**Caddyfile:**
+
+```
+app.example.com {
+    reverse_proxy 127.0.0.1:18080
+}
+
+api.example.com {
+    reverse_proxy 127.0.0.1:18070
+}
+```
+
+Now clients access `https://app.example.com` (Caddy handles TLS) and Caddy forwards to the relay on loopback. The tunnel carries the traffic to the agent. The customer ports are not accessible from the internet directly.
+
+See [Multi-Tenancy Guide](docs/operations/multi-tenancy.md) for the full pattern.
+
+## How To: Run Multiple Customers on One Relay
+
+Each customer gets their own ports and their own agent certificate. Traffic is isolated by construction -- port-to-customer mapping is static.
+
+```yaml
+customers:
+  - id: customer-acme
+    max_streams: 50
+    ports:
+      - port: 18080
+        service: http
+        listen_addr: 127.0.0.1
+      - port: 18070
+        service: api
+        listen_addr: 127.0.0.1
+
+  - id: customer-globex
+    max_streams: 100
+    ports:
+      - port: 19080
+        service: http
+      - port: 19445
+        service: smb
+```
+
+Each customer needs their own agent certificate with `CN=customer-{id}` signed by the Customer Intermediate CA. The relay verifies the certificate and registers the agent under that customer ID.
 
 ## Architecture
 
@@ -147,6 +360,23 @@ For cross-machine and AWS deployment, see [Setup and Testing Guide](docs/operati
  +--------------------------------------------------------------------+
 ```
 
+### Certificate Hierarchy
+
+```
+AtlasShare Root CA (10-year, offline)
+    |
+    +--- Relay Intermediate CA (3-year)
+    |         |
+    |         +--- relay.example.com (90-day server cert)
+    |
+    +--- Customer Intermediate CA (3-year)
+              |
+              +--- customer-acme (90-day client cert)
+              +--- customer-globex (90-day client cert)
+```
+
+The relay trusts the Customer Intermediate CA for agent authentication. The agent trusts the Relay Intermediate CA for server verification. Neither trusts the Root CA directly -- scoped trust prevents cross-domain certificate misuse.
+
 ### Wire Protocol
 
 12-byte frame header, binary, big-endian:
@@ -154,38 +384,15 @@ For cross-machine and AWS deployment, see [Setup and Testing Guide](docs/operati
 | Field | Size | Description |
 |-------|------|-------------|
 | Version | 1B | Protocol version (0x01) |
-| Command | 1B | STREAM_OPEN, STREAM_DATA, STREAM_CLOSE, PING, PONG, WINDOW_UPDATE, GOAWAY, ... |
-| Flags | 1B | FIN, ACK |
+| Command | 1B | STREAM_OPEN, STREAM_DATA, STREAM_CLOSE, PING, PONG, WINDOW_UPDATE, GOAWAY |
+| Flags | 1B | FIN (half-close), ACK (handshake) |
 | Reserved | 1B | 0x00 |
-| Stream ID | 4B | Relay-initiated: odd, Agent-initiated: even |
+| Stream ID | 4B | Relay-initiated: odd (1,3,5...), Agent-initiated: even (2,4,6...) |
 | Payload Length | 4B | Max 16MB per frame |
 
+Each client connection becomes a stream. Streams are multiplexed over the single mTLS tunnel. Flow control windows (per-stream and per-connection) prevent fast senders from overwhelming slow receivers.
+
 See [Protocol Documentation](docs/protocol/) for the full specification.
-
-## Multi-Tenant Deployment
-
-Each customer gets dedicated ports on the relay with configurable limits:
-
-```yaml
-customers:
-  - id: customer-acme
-    max_streams: 50
-    ports:
-      - port: 18080
-        service: http
-        listen_addr: 127.0.0.1   # only Caddy can reach this
-      - port: 18070
-        service: api
-        listen_addr: 127.0.0.1
-
-  - id: customer-globex
-    max_streams: 100
-    ports:
-      - port: 19080
-        service: http
-```
-
-For the full isolation model, Caddy reverse proxy pattern, and Prometheus metrics, see [Multi-Tenancy Guide](docs/operations/multi-tenancy.md).
 
 ## Community vs Enterprise
 
@@ -208,7 +415,7 @@ For the full isolation model, Caddy reverse proxy pattern, and Prometheus metric
 
 ## Documentation
 
-- [Setup and Testing](docs/operations/setup-and-testing.md) -- Local, LAN, and AWS deployment guide
+- [Setup and Testing](docs/operations/setup-and-testing.md) -- Local, LAN, and AWS deployment
 - [Multi-Tenancy](docs/operations/multi-tenancy.md) -- Isolation model, limits, Caddy pattern
 - [Architecture](docs/architecture/) -- System design and component overview
 - [Protocol](docs/protocol/) -- Wire protocol specification
