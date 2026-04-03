@@ -133,6 +133,22 @@ func (cl *ClientListener) handleClient(
 	}
 }
 
+// StopPort closes the TCP listener for a single port.
+func (cl *ClientListener) StopPort(port int) error {
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+
+	ln, ok := cl.listeners[port]
+	if !ok {
+		return fmt.Errorf("relay: client listener: port %d not found", port)
+	}
+
+	ln.Close()
+	delete(cl.listeners, port)
+	cl.logger.Info("relay: client listener stopped", "port", port)
+	return nil
+}
+
 // Stop closes all active client listeners.
 func (cl *ClientListener) Stop() {
 	cl.mu.Lock()
