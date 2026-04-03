@@ -111,15 +111,20 @@ func run() error {
 		Timestamp: time.Now(),
 	})
 
-	// Start admin server (health check + metrics)
-	if cfg.Server.AdminAddr != "" {
-		admin := relay.NewAdminServer(cfg.Server.AdminAddr, registry, logger)
-		go func() {
-			if adminErr := admin.Start(ctx); adminErr != nil {
-				logger.Error("admin server error", "error", adminErr)
-			}
-		}()
-	}
+	// Start admin server (health check + metrics + CRUD API)
+	admin := relay.NewAdminServer(relay.AdminConfig{
+		Addr:           cfg.Server.AdminAddr,
+		SocketPath:     "/var/run/atlax.sock",
+		Registry:       registry,
+		Router:         router,
+		ClientListener: clientListener,
+		Logger:         logger,
+	})
+	go func() {
+		if adminErr := admin.Start(ctx); adminErr != nil {
+			logger.Error("admin server error", "error", adminErr)
+		}
+	}()
 
 	serverDone := make(chan error, 1)
 	go func() {

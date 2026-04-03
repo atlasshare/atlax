@@ -3,18 +3,44 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
+	"net"
 	"net/http"
+	"os"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
-// AdminServer serves health check and Prometheus metrics endpoints.
+// AdminServer serves the admin API: health check, Prometheus metrics,
+// and CRUD operations for ports, agents, and stats.
 type AdminServer struct {
-	registry AgentRegistry
-	logger   *slog.Logger
-	server   *http.Server
+	registry       AgentRegistry
+	router         *PortRouter
+	clientListener *ClientListener
+	logger         *slog.Logger
+	server         *http.Server
+	socketPath     string
+	startTime      time.Time
+}
+
+// AdminConfig holds settings for the admin server.
+type AdminConfig struct {
+	// Addr is the TCP address (e.g., "127.0.0.1:9090"). If empty and
+	// SocketPath is set, only the unix socket is used.
+	Addr string
+
+	// SocketPath is the unix domain socket path (e.g., "/var/run/atlax.sock").
+	// If empty, only TCP is used.
+	SocketPath string
+
+	Registry       AgentRegistry
+	Router         *PortRouter
+	ClientListener *ClientListener
+	Logger         *slog.Logger
 }
 
 // HealthResponse is the JSON body returned by /healthz.
@@ -24,38 +50,123 @@ type HealthResponse struct {
 	Streams int    `json:"streams"`
 }
 
-// NewAdminServer creates an admin HTTP server on the given address.
-func NewAdminServer(addr string, registry AgentRegistry, logger *slog.Logger) *AdminServer {
+// StatsResponse is the JSON body returned by /stats.
+type StatsResponse struct {
+	Status        string  `json:"status"`
+	Uptime        string  `json:"uptime"`
+	UptimeSeconds float64 `json:"uptime_seconds"`
+	Agents        int     `json:"agents"`
+	Streams       int     `json:"streams"`
+}
+
+// PortResponse represents a single port mapping in API responses.
+type PortResponse struct {
+	Port       int    `json:"port"`
+	CustomerID string `json:"customer_id"`
+	Service    string `json:"service"`
+}
+
+// AgentResponse represents a connected agent in API responses.
+type AgentResponse struct {
+	CustomerID  string `json:"customer_id"`
+	RemoteAddr  string `json:"remote_addr"`
+	ConnectedAt string `json:"connected_at"`
+	LastSeen    string `json:"last_seen"`
+	StreamCount int    `json:"stream_count"`
+}
+
+// PortCreateRequest is the JSON body for POST /ports.
+type PortCreateRequest struct {
+	Port       int    `json:"port"`
+	CustomerID string `json:"customer_id"`
+	Service    string `json:"service"`
+	MaxStreams int    `json:"max_streams"`
+}
+
+// NewAdminServer creates an admin server with the full API.
+func NewAdminServer(cfg AdminConfig) *AdminServer {
 	a := &AdminServer{
-		registry: registry,
-		logger:   logger,
+		registry:       cfg.Registry,
+		router:         cfg.Router,
+		clientListener: cfg.ClientListener,
+		logger:         cfg.Logger,
+		socketPath:     cfg.SocketPath,
+		startTime:      time.Now(),
 	}
 
 	mux := http.NewServeMux()
+
+	// Existing endpoints
 	mux.HandleFunc("/healthz", a.handleHealth)
 	mux.Handle("/metrics", promhttp.Handler())
 
+	// CRUD endpoints
+	mux.HandleFunc("/ports", a.handlePorts)
+	mux.HandleFunc("/ports/", a.handlePortByID)
+	mux.HandleFunc("/agents", a.handleAgents)
+	mux.HandleFunc("/agents/", a.handleAgentByID)
+	mux.HandleFunc("/stats", a.handleStats)
+
 	a.server = &http.Server{
-		Addr:              addr,
+		Addr:              cfg.Addr,
 		Handler:           mux,
 		ReadHeaderTimeout: 10 * time.Second,
 	}
 	return a
 }
 
-// Start begins serving. Blocks until ctx is canceled.
+// Start begins serving on TCP and/or unix socket. Blocks until ctx is canceled.
 func (a *AdminServer) Start(ctx context.Context) error {
 	go func() {
 		<-ctx.Done()
 		a.server.Close()
+		if a.socketPath != "" {
+			os.Remove(a.socketPath)
+		}
 	}()
 
-	a.logger.Info("relay: admin server started", "addr", a.server.Addr)
-	if err := a.server.ListenAndServe(); err != http.ErrServerClosed {
+	// Unix socket listener
+	if a.socketPath != "" {
+		os.Remove(a.socketPath) // clean up stale socket
+		unixLn, err := net.Listen("unix", a.socketPath)
+		if err != nil {
+			return fmt.Errorf("admin: unix socket: %w", err)
+		}
+		os.Chmod(a.socketPath, 0o660) //nolint:errcheck // best-effort permissions
+
+		a.logger.Info("relay: admin socket started", "path", a.socketPath)
+
+		if a.server.Addr == "" {
+			// Socket only, no TCP
+			return a.serve(unixLn)
+		}
+
+		// Both socket and TCP
+		go func() {
+			if err := a.serve(unixLn); err != nil {
+				a.logger.Error("admin: unix socket error", "error", err)
+			}
+		}()
+	}
+
+	// TCP listener
+	if a.server.Addr != "" {
+		a.logger.Info("relay: admin server started", "addr", a.server.Addr)
+		if err := a.server.ListenAndServe(); err != http.ErrServerClosed {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *AdminServer) serve(ln net.Listener) error {
+	if err := a.server.Serve(ln); err != http.ErrServerClosed {
 		return err
 	}
 	return nil
 }
+
+// --- Health ---
 
 func (a *AdminServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	agents, err := a.registry.ListConnectedAgents(r.Context())
@@ -69,12 +180,194 @@ func (a *AdminServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 		totalStreams += agent.StreamCount
 	}
 
-	resp := HealthResponse{
+	writeJSON(w, HealthResponse{
 		Status:  "ok",
 		Agents:  len(agents),
 		Streams: totalStreams,
+	})
+}
+
+// --- Stats ---
+
+func (a *AdminServer) handleStats(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
 	}
 
+	agents, err := a.registry.ListConnectedAgents(r.Context())
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+
+	totalStreams := 0
+	for _, agent := range agents {
+		totalStreams += agent.StreamCount
+	}
+
+	uptime := time.Since(a.startTime)
+	writeJSON(w, StatsResponse{
+		Status:        "ok",
+		Uptime:        uptime.Round(time.Second).String(),
+		UptimeSeconds: uptime.Seconds(),
+		Agents:        len(agents),
+		Streams:       totalStreams,
+	})
+}
+
+// --- Ports ---
+
+func (a *AdminServer) handlePorts(w http.ResponseWriter, r *http.Request) {
+	switch r.Method {
+	case http.MethodGet:
+		a.listPorts(w, r)
+	case http.MethodPost:
+		a.createPort(w, r)
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *AdminServer) handlePortByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	portStr := strings.TrimPrefix(r.URL.Path, "/ports/")
+	port, err := strconv.Atoi(portStr)
+	if err != nil {
+		http.Error(w, `{"error":"invalid port number"}`, http.StatusBadRequest)
+		return
+	}
+
+	a.deletePort(w, r, port)
+}
+
+func (a *AdminServer) listPorts(w http.ResponseWriter, _ *http.Request) {
+	a.router.mu.RLock()
+	defer a.router.mu.RUnlock()
+
+	ports := make([]PortResponse, 0, len(a.router.portMap))
+	for port, entry := range a.router.portMap {
+		ports = append(ports, PortResponse{
+			Port:       port,
+			CustomerID: entry.customerID,
+			Service:    entry.service,
+		})
+	}
+	writeJSON(w, ports)
+}
+
+func (a *AdminServer) createPort(w http.ResponseWriter, r *http.Request) {
+	var req PortCreateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return
+	}
+
+	if req.Port <= 0 || req.CustomerID == "" || req.Service == "" {
+		http.Error(w, `{"error":"port, customer_id, and service are required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := a.router.AddPortMapping(req.CustomerID, req.Port, req.Service, req.MaxStreams); err != nil {
+		writeError(w, err.Error(), http.StatusConflict)
+		return
+	}
+
+	a.logger.Info("admin: port mapping added",
+		"port", req.Port,
+		"customer_id", req.CustomerID,
+		"service", req.Service)
+
+	w.WriteHeader(http.StatusCreated)
+	writeJSON(w, PortResponse{
+		Port:       req.Port,
+		CustomerID: req.CustomerID,
+		Service:    req.Service,
+	})
+}
+
+func (a *AdminServer) deletePort(w http.ResponseWriter, _ *http.Request, port int) {
+	customerID, _, ok := a.router.LookupPort(port)
+	if !ok {
+		http.Error(w, `{"error":"port not found"}`, http.StatusNotFound)
+		return
+	}
+
+	if err := a.router.RemovePortMapping(customerID, port); err != nil {
+		writeError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	a.logger.Info("admin: port mapping removed",
+		"port", port,
+		"customer_id", customerID)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Agents ---
+
+func (a *AdminServer) handleAgents(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodGet {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	agents, err := a.registry.ListConnectedAgents(r.Context())
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+
+	resp := make([]AgentResponse, len(agents))
+	for i, ag := range agents {
+		resp[i] = AgentResponse{
+			CustomerID:  ag.CustomerID,
+			RemoteAddr:  ag.RemoteAddr,
+			ConnectedAt: ag.ConnectedAt.Format(time.RFC3339),
+			LastSeen:    ag.LastSeen.Format(time.RFC3339),
+			StreamCount: ag.StreamCount,
+		}
+	}
+	writeJSON(w, resp)
+}
+
+func (a *AdminServer) handleAgentByID(w http.ResponseWriter, r *http.Request) {
+	if r.Method != http.MethodDelete {
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		return
+	}
+
+	customerID := strings.TrimPrefix(r.URL.Path, "/agents/")
+	if customerID == "" {
+		http.Error(w, `{"error":"customer_id required"}`, http.StatusBadRequest)
+		return
+	}
+
+	if err := a.registry.Unregister(r.Context(), customerID); err != nil {
+		writeError(w, err.Error(), http.StatusNotFound)
+		return
+	}
+
+	a.logger.Info("admin: agent disconnected",
+		"customer_id", customerID)
+
+	w.WriteHeader(http.StatusNoContent)
+}
+
+// --- Helpers ---
+
+func writeError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(resp) //nolint:errcheck // best-effort response
+	w.WriteHeader(code)
+	json.NewEncoder(w).Encode(map[string]string{"error": msg}) //nolint:errcheck // best-effort
+}
+
+func writeJSON(w http.ResponseWriter, v any) {
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(v) //nolint:errcheck // best-effort response
 }
