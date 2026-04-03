@@ -1,0 +1,47 @@
+groups:
+  - name: atlax-relay
+    rules:
+      - alert: AgentDisconnected
+        expr: atlax_connections_active == 0
+        for: 2m
+        labels:
+          severity: critical
+        annotations:
+          summary: "No agents connected to relay"
+          description: "All agents have been disconnected for more than 2 minutes."
+
+      - alert: AgentDown
+        expr: changes(atlax_connections_active[5m]) > 3
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Agent connection flapping for {{ $labels.customer_id }}"
+          description: "Agent for {{ $labels.customer_id }} has reconnected {{ $value }} times in 5 minutes."
+
+      - alert: HighRejectionRate
+        expr: rate(atlax_clients_rejected_total[5m]) > 10
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: "High client rejection rate for {{ $labels.customer_id }}"
+          description: "{{ $labels.customer_id }} rejecting {{ $value }}/sec (reason: {{ $labels.reason }})."
+
+      - alert: StreamLimitApproaching
+        expr: atlax_streams_active / on(customer_id) group_left atlax_streams_active > 0.8
+        for: 5m
+        labels:
+          severity: warning
+        annotations:
+          summary: "Stream limit approaching for {{ $labels.customer_id }}"
+          description: "{{ $labels.customer_id }} at {{ $value | humanizePercentage }} of stream capacity."
+
+      - alert: RelayDown
+        expr: up{job="atlax-relay"} == 0
+        for: 1m
+        labels:
+          severity: critical
+        annotations:
+          summary: "atlax relay is unreachable"
+          description: "Prometheus cannot scrape the relay metrics endpoint."

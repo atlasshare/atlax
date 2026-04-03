@@ -1,0 +1,75 @@
+{
+  "dashboard": {
+    "title": "atlax Relay",
+    "uid": "atlax-relay",
+    "tags": ["atlax", "relay", "tunnel"],
+    "timezone": "browser",
+    "refresh": "10s",
+    "panels": [
+      {
+        "title": "Active Agents",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+        "targets": [
+          {"expr": "sum(atlax_connections_active)", "legendFormat": "agents"}
+        ]
+      },
+      {
+        "title": "Active Streams",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+        "targets": [
+          {"expr": "sum(atlax_streams_active)", "legendFormat": "streams"}
+        ]
+      },
+      {
+        "title": "Rejection Rate",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+        "targets": [
+          {"expr": "sum(rate(atlax_clients_rejected_total[5m]))", "legendFormat": "rejected/sec"}
+        ]
+      },
+      {
+        "title": "Total Streams (all time)",
+        "type": "stat",
+        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+        "targets": [
+          {"expr": "sum(atlax_streams_total)", "legendFormat": "total"}
+        ]
+      },
+      {
+        "title": "Active Streams per Customer",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "targets": [
+          {"expr": "atlax_streams_active", "legendFormat": "{{ customer_id }}"}
+        ]
+      },
+      {
+        "title": "Stream Open Rate per Customer",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+        "targets": [
+          {"expr": "rate(atlax_streams_total[5m])", "legendFormat": "{{ customer_id }}"}
+        ]
+      },
+      {
+        "title": "Agent Connections per Customer",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+        "targets": [
+          {"expr": "atlax_connections_active", "legendFormat": "{{ customer_id }}"}
+        ]
+      },
+      {
+        "title": "Client Rejections by Reason",
+        "type": "timeseries",
+        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+        "targets": [
+          {"expr": "rate(atlax_clients_rejected_total[5m])", "legendFormat": "{{ customer_id }} ({{ reason }})"}
+        ]
+      }
+    ]
+  }
+}
