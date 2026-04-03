@@ -2,7 +2,7 @@
 
 **Objective:** Make atlax deployable at scale with infrastructure-as-code, monitoring, zero-downtime updates, and a clean separation between the community (open-source, Apache 2.0) and enterprise (private, commercial) codebases. After this phase, the community edition is distributable and the enterprise edition has its own repo with commercial-only features.
 
-**Status:** NOT STARTED
+**Status:** IN PROGRESS (Steps 1-5 complete, Steps 6-8 remaining)
 **Target duration:** 3-4 weeks
 **Estimated sessions:** 8-12
 
@@ -31,19 +31,19 @@
 
 | Issue | Item | Step |
 |-------|------|------|
-| #61 | Zero-downtime relay binary swap (fd passing) | Step 5 |
-| #62 | Agent self-update via signed manifest | Step 5 |
-| #63 | Multi-agent support (max_connections > 1) | Step 6 |
-| #69 | Certificate issuance automation | Step 6 |
+| #61 | Zero-downtime relay binary swap (fd passing) | Step 6 |
+| #62 | Agent self-update via signed manifest | Step 6 |
+| #63 | Multi-agent support (max_connections > 1) | Step 7 |
+| #69 | Certificate issuance automation | Step 7 |
 
 ### Track C: Enterprise separation
 
 | Item | Step |
 |------|------|
-| Extract enterprise interfaces into stable API contract | Step 7 |
-| Create `atlax-enterprise` private repo | Step 7 |
-| Enterprise cmd/relay and cmd/agent with commercial wiring | Step 7 |
-| Distribution: community tarball, enterprise Docker images | Step 7 |
+| Extract enterprise interfaces into stable API contract | Step 8 |
+| Create `atlax-enterprise` private repo | Step 8 |
+| Enterprise cmd/relay and cmd/agent with commercial wiring | Step 8 |
+| Distribution: community tarball, enterprise Docker images | Step 8 |
 
 ---
 
@@ -132,13 +132,16 @@ Step 3 (Security + performance: fuzz, sync.Pool, agent benchmark)
 Step 4 (Admin API: dynamic port allocation)
    |
    v
-Step 5 (Enterprise: zero-downtime swap + self-update)
+Step 5 (Community release prep: port lifecycle fix, coverage, v0.1.0 tag)
    |
    v
-Step 6 (Enterprise: multi-agent + cert automation)
+Step 6 (Enterprise: zero-downtime swap + self-update)
    |
    v
-Step 7 (Enterprise separation: private repo, distribution)
+Step 7 (Enterprise: multi-agent + cert automation)
+   |
+   v
+Step 8 (Enterprise separation: private repo, distribution)
 ```
 
 ---
@@ -209,9 +212,27 @@ Step 7 (Enterprise separation: private repo, distribution)
 
 ---
 
-## Step 5: Enterprise -- Zero-Downtime + Self-Update
+## Step 5: Community Release Prep (v0.1.0)
+
+**Branch:** `phase6/port-lifecycle`
+
+See `plans/phase6-step5-community-release-plan.md` for the full sub-step breakdown.
+
+### Tasks
+
+- [x] Fix admin API port lifecycle: POST /ports starts TCP listener, DELETE /ports stops it
+- [x] Add StopPort method to ClientListener, ListenAddr field to PortCreateRequest
+- [x] Raise pkg/relay coverage from 72% to 88%
+- [x] Rewrite stale docs/api/control-plane.md to match actual implementation
+- [x] Update phase 6 execution log
+- [x] Tag v0.1.0 on main + GitHub release
+
+---
+
+## Step 6: Enterprise -- Zero-Downtime + Self-Update
 
 **Branch:** `phase6/enterprise-updates` (on `atlax-enterprise` repo)
+**Depends on:** Step 5 (v0.1.0 tag)
 **Closes:** #61, #62
 
 ### Tasks
@@ -234,9 +255,10 @@ Step 7 (Enterprise separation: private repo, distribution)
 
 ---
 
-## Step 6: Enterprise -- Multi-Agent + Cert Automation
+## Step 7: Enterprise -- Multi-Agent + Cert Automation
 
 **Branch:** `phase6/enterprise-features` (on `atlax-enterprise` repo)
+**Depends on:** Step 6
 **Closes:** #63, #69
 
 ### Tasks
@@ -257,9 +279,10 @@ Step 7 (Enterprise separation: private repo, distribution)
 
 ---
 
-## Step 7: Enterprise Separation + Distribution
+## Step 8: Enterprise Separation + Distribution
 
 **Branch:** `phase6/separation` (both repos)
+**Depends on:** Steps 6-7
 
 ### Tasks
 
@@ -267,14 +290,14 @@ Step 7 (Enterprise separation: private repo, distribution)
 
 - [ ] Audit all interfaces: document stability guarantees in `docs/api/interfaces.md`
 - [ ] Remove any enterprise-specific comments or TODO placeholders
-- [ ] Tag release: `v1.0.0-community`
+- [ ] Tag release: `v0.1.0`
 - [ ] GitHub release with pre-built binaries (linux/amd64, linux/arm64, darwin/arm64)
 - [ ] Docker Hub push: `atlasshare/atlax-relay:1.0.0`, `atlasshare/atlax-agent:1.0.0`
 
 #### Enterprise repo creation
 
 - [ ] `github.com/atlasshare/atlax-enterprise` (private)
-- [ ] `go.mod`: require `github.com/atlasshare/atlax v1.0.0`
+- [ ] `go.mod`: require `github.com/atlasshare/atlax v0.1.0`
 - [ ] `cmd/relay/main.go`: wire RedisRegistry + VaultStore + SIEMEmitter
 - [ ] `cmd/agent/main.go`: wire VaultStore + self-updater
 - [ ] CI: build enterprise binaries, run community test suite
@@ -307,13 +330,14 @@ Step 7 (Enterprise separation: private repo, distribution)
 
 | Step | Status | PR | Date |
 |------|--------|----|------|
-| Step 1: Systemd + Docker | NOT STARTED | -- | -- |
-| Step 2: Monitoring | NOT STARTED | -- | -- |
-| Step 3: Security + perf | NOT STARTED | -- | -- |
-| Step 4: Admin API | NOT STARTED | -- | -- |
-| Step 5: Enterprise updates | NOT STARTED | -- | -- |
-| Step 6: Enterprise features | NOT STARTED | -- | -- |
-| Step 7: Separation + distribution | NOT STARTED | -- | -- |
+| Step 1: Systemd + Docker | COMPLETED | #72 | 2026-04-02 |
+| Step 2: Monitoring | COMPLETED | #73 | 2026-04-02 |
+| Step 3: Security + perf | COMPLETED | #74 | 2026-04-02 |
+| Step 4: Admin API | COMPLETED | #75 | 2026-04-03 |
+| Step 5: Community release prep (v0.1.0) | COMPLETED | #76 | 2026-04-03 |
+| Step 6: Enterprise updates | NOT STARTED | -- | -- |
+| Step 7: Enterprise features | NOT STARTED | -- | -- |
+| Step 8: Separation + distribution | NOT STARTED | -- | -- |
 
 ---
 

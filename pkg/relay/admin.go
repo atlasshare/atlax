@@ -25,6 +25,7 @@ type AdminServer struct {
 	server         *http.Server
 	socketPath     string
 	startTime      time.Time
+	ctx            context.Context // lifecycle context for spawned port listeners
 }
 
 // AdminConfig holds settings for the admin server.
@@ -81,6 +82,7 @@ type PortCreateRequest struct {
 	CustomerID string `json:"customer_id"`
 	Service    string `json:"service"`
 	MaxStreams int    `json:"max_streams"`
+	ListenAddr string `json:"listen_addr"`
 }
 
 // NewAdminServer creates an admin server with the full API.
@@ -117,6 +119,8 @@ func NewAdminServer(cfg AdminConfig) *AdminServer {
 
 // Start begins serving on TCP and/or unix socket. Blocks until ctx is canceled.
 func (a *AdminServer) Start(ctx context.Context) error {
+	a.ctx = ctx
+
 	go func() {
 		<-ctx.Done()
 		a.server.Close()
@@ -277,10 +281,39 @@ func (a *AdminServer) createPort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	// Start a TCP listener for the new port.
+	listenAddr := req.ListenAddr
+	if listenAddr == "" {
+		listenAddr = "0.0.0.0"
+	}
+	addr := fmt.Sprintf("%s:%d", listenAddr, req.Port)
+
+	listenerCtx := a.ctx
+	if listenerCtx == nil {
+		listenerCtx = context.Background()
+	}
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- a.clientListener.StartPort(listenerCtx, addr, req.Port)
+	}()
+
+	// Brief wait to detect immediate bind failure (port in use, permission denied).
+	select {
+	case err := <-errCh:
+		// StartPort returned immediately -- bind failed.
+		a.router.RemovePortMapping(req.CustomerID, req.Port) //nolint:errcheck // rollback best-effort
+		writeError(w, fmt.Sprintf("listen %s: %v", addr, err), http.StatusConflict)
+		return
+	case <-time.After(50 * time.Millisecond):
+		// Listener started successfully (blocking in accept loop).
+	}
+
 	a.logger.Info("admin: port mapping added",
 		"port", req.Port,
 		"customer_id", req.CustomerID,
-		"service", req.Service)
+		"service", req.Service,
+		"listen_addr", addr)
 
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, PortResponse{
@@ -300,6 +333,13 @@ func (a *AdminServer) deletePort(w http.ResponseWriter, _ *http.Request, port in
 	if err := a.router.RemovePortMapping(customerID, port); err != nil {
 		writeError(w, err.Error(), http.StatusInternalServerError)
 		return
+	}
+
+	// Stop the TCP listener for this port. Log warning if it was not
+	// admin-started (e.g., started from config at boot).
+	if err := a.clientListener.StopPort(port); err != nil {
+		a.logger.Warn("admin: stop listener (may be config-started)",
+			"port", port, "error", err)
 	}
 
 	a.logger.Info("admin: port mapping removed",

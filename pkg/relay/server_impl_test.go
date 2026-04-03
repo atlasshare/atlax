@@ -136,3 +136,18 @@ func TestRelay_GracefulShutdownSendsGoAway(t *testing.T) {
 	_, err := reg.Lookup(context.Background(), "customer-001")
 	assert.ErrorIs(t, err, ErrAgentNotFound)
 }
+
+func TestRelay_Addr_ReturnsNil(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
+
+	r := NewRelay(ServerDeps{
+		Registry:       reg,
+		Router:         router,
+		ClientListener: cl,
+		Logger:         slog.Default(),
+	})
+
+	assert.Nil(t, r.Addr(), "Addr returns nil (no accessor exposed)")
+}

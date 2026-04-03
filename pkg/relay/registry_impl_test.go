@@ -9,6 +9,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -149,4 +150,21 @@ func TestMemoryRegistry_ConcurrentAccess(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
+}
+
+func TestMemoryRegistry_SetMetrics(t *testing.T) {
+	reg := testRegistry()
+	m := NewMetrics("test", prometheus.NewRegistry())
+	reg.SetMetrics(m)
+	assert.NotNil(t, reg.metrics)
+}
+
+func TestMemoryRegistry_SetCustomerLimit(t *testing.T) {
+	reg := testRegistry()
+	reg.SetCustomerLimit("customer-001", 5)
+
+	reg.mu.RLock()
+	limit := reg.customerLimits["customer-001"]
+	reg.mu.RUnlock()
+	assert.Equal(t, 5, limit)
 }
