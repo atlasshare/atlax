@@ -9,8 +9,8 @@ Type=simple
 User=atlax
 Group=atlax
 
-ExecStart=/usr/local/bin/atlax-agent --config /etc/atlax/agent.yaml
-Restart=on-failure
+ExecStart=/usr/local/bin/atlax-agent -config /etc/atlax/agent.yaml
+Restart=always
 RestartSec=5s
 
 EnvironmentFile=-/etc/atlax/agent.env
@@ -33,6 +33,7 @@ MemoryDenyWriteExecute=yes
 LockPersonality=yes
 
 ReadWritePaths=/var/lib/atlax /var/log/atlax
+ReadOnlyPaths=/etc/atlax
 
 # No privileged ports needed (outbound connections only)
 CapabilityBoundingSet=
