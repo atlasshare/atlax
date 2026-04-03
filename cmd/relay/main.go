@@ -83,6 +83,13 @@ func run() error {
 	router.SetMetrics(metrics)
 	clientListener := relay.NewClientListener(relay.ClientListenerConfig{Router: router, Logger: logger})
 
+	// Configure per-customer rate limiters from YAML config.
+	for _, c := range cfg.Customers {
+		if c.RateLimit.RequestsPerSecond > 0 {
+			clientListener.SetRateLimiter(c.ID, c.RateLimit.RequestsPerSecond, c.RateLimit.Burst)
+		}
+	}
+
 	server := relay.NewRelay(relay.ServerDeps{
 		AgentListener:  agentListener,
 		ClientListener: clientListener,

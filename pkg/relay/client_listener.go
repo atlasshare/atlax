@@ -11,29 +11,38 @@ import (
 // ClientListener accepts plain TCP connections on per-customer dedicated
 // ports and routes them through the TrafficRouter to the correct agent.
 type ClientListener struct {
-	router      *PortRouter
-	logger      *slog.Logger
-	rateLimiter *IPRateLimiter
-	listeners   map[int]net.Listener
+	router       *PortRouter
+	logger       *slog.Logger
+	rateLimiters map[string]*IPRateLimiter // customerID -> limiter
+	listeners    map[int]net.Listener
 
 	mu sync.Mutex
 }
 
 // ClientListenerConfig holds settings for the client listener.
 type ClientListenerConfig struct {
-	Router      *PortRouter
-	Logger      *slog.Logger
-	RateLimiter *IPRateLimiter // nil = no rate limiting
+	Router *PortRouter
+	Logger *slog.Logger
 }
 
 // NewClientListener creates a client listener.
 func NewClientListener(cfg ClientListenerConfig) *ClientListener {
 	return &ClientListener{
-		router:      cfg.Router,
-		logger:      cfg.Logger,
-		rateLimiter: cfg.RateLimiter,
-		listeners:   make(map[int]net.Listener),
+		router:       cfg.Router,
+		logger:       cfg.Logger,
+		rateLimiters: make(map[string]*IPRateLimiter),
+		listeners:    make(map[int]net.Listener),
 	}
+}
+
+// SetRateLimiter configures a per-customer rate limiter.
+func (cl *ClientListener) SetRateLimiter(customerID string, rps float64, burst int) {
+	if rps <= 0 {
+		return
+	}
+	cl.mu.Lock()
+	defer cl.mu.Unlock()
+	cl.rateLimiters[customerID] = NewIPRateLimiter(rps, burst)
 }
 
 // StartPort opens a TCP listener on the given address and routes all
@@ -93,13 +102,17 @@ func (cl *ClientListener) handleClient(
 		return
 	}
 
-	// Rate limit by source IP.
-	if cl.rateLimiter != nil {
+	// Rate limit by source IP (per-customer limiter).
+	cl.mu.Lock()
+	rl := cl.rateLimiters[customerID]
+	cl.mu.Unlock()
+
+	if rl != nil {
 		ip, _, splitErr := net.SplitHostPort(conn.RemoteAddr().String())
 		if splitErr != nil {
 			ip = conn.RemoteAddr().String()
 		}
-		if !cl.rateLimiter.Allow(ip) {
+		if !rl.Allow(ip) {
 			if cl.router.metrics != nil {
 				cl.router.metrics.ClientRejected(customerID, "rate_limited")
 			}
@@ -131,9 +144,10 @@ func (cl *ClientListener) Stop() {
 	}
 	cl.listeners = make(map[int]net.Listener)
 
-	if cl.rateLimiter != nil {
-		cl.rateLimiter.Stop()
+	for _, rl := range cl.rateLimiters {
+		rl.Stop()
 	}
+	cl.rateLimiters = make(map[string]*IPRateLimiter)
 }
 
 // Addr returns the listening address for the given port, or nil.
