@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"fmt"
 	"log/slog"
 	"net"
 	"net/http"
+	"os"
 	"testing"
 	"time"
 
@@ -289,4 +291,165 @@ func TestAdmin_CreatePort_DuplicateReturnsConflict(t *testing.T) {
 	require.NoError(t, err)
 	defer resp2.Body.Close()
 	assert.Equal(t, http.StatusConflict, resp2.StatusCode)
+}
+
+// --- Admin error path coverage tests (Step 5b) ---
+
+func TestAdmin_Stats_MethodNotAllowed(t *testing.T) {
+	addr, _, _, _ := testAdminServer(t)
+
+	resp, err := http.Post("http://"+addr+"/stats", "application/json", http.NoBody)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+}
+
+func TestAdmin_Ports_MethodNotAllowed(t *testing.T) {
+	addr, _, _, _ := testAdminServer(t)
+
+	req, err := http.NewRequest(http.MethodPut, "http://"+addr+"/ports", http.NoBody)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+}
+
+func TestAdmin_Agents_MethodNotAllowed(t *testing.T) {
+	addr, _, _, _ := testAdminServer(t)
+
+	resp, err := http.Post("http://"+addr+"/agents", "application/json", http.NoBody)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+}
+
+func TestAdmin_AgentByID_MethodNotAllowed(t *testing.T) {
+	addr, _, _, _ := testAdminServer(t)
+
+	resp, err := http.Get("http://" + addr + "/agents/customer-001")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+}
+
+func TestAdmin_AgentByID_EmptyID(t *testing.T) {
+	addr, _, _, _ := testAdminServer(t)
+
+	req, err := http.NewRequest(http.MethodDelete, "http://"+addr+"/agents/", http.NoBody)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestAdmin_PortByID_InvalidPort(t *testing.T) {
+	addr, _, _, _ := testAdminServer(t)
+
+	req, err := http.NewRequest(http.MethodDelete, "http://"+addr+"/ports/abc", http.NoBody)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
+}
+
+func TestAdmin_PortByID_MethodNotAllowed(t *testing.T) {
+	addr, _, _, _ := testAdminServer(t)
+
+	resp, err := http.Get("http://" + addr + "/ports/12345")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
+}
+
+func TestAdmin_StartUnixSocket(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
+
+	// Use /tmp to avoid macOS 104-char unix socket path limit.
+	socketPath := fmt.Sprintf("/tmp/atlax-test-%d.sock", time.Now().UnixNano())
+	t.Cleanup(func() { os.Remove(socketPath) })
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	admin := NewAdminServer(AdminConfig{
+		SocketPath:     socketPath,
+		Registry:       reg,
+		Router:         router,
+		ClientListener: cl,
+		Logger:         slog.Default(),
+	})
+
+	go func() {
+		admin.Start(ctx) //nolint:errcheck // stopped via ctx cancel
+	}()
+	time.Sleep(150 * time.Millisecond)
+
+	// HTTP request over unix socket.
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", socketPath)
+			},
+		},
+	}
+
+	resp, err := client.Get("http://unix/healthz")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+func TestAdmin_StartBothTCPAndUnix(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
+
+	socketPath := fmt.Sprintf("/tmp/atlax-test-%d.sock", time.Now().UnixNano())
+	t.Cleanup(func() { os.Remove(socketPath) })
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	tcpAddr := ln.Addr().String()
+	ln.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	admin := NewAdminServer(AdminConfig{
+		Addr:           tcpAddr,
+		SocketPath:     socketPath,
+		Registry:       reg,
+		Router:         router,
+		ClientListener: cl,
+		Logger:         slog.Default(),
+	})
+
+	go func() {
+		admin.Start(ctx) //nolint:errcheck // stopped via ctx cancel
+	}()
+	time.Sleep(150 * time.Millisecond)
+
+	// TCP works.
+	resp1, err := http.Get("http://" + tcpAddr + "/healthz")
+	require.NoError(t, err)
+	defer resp1.Body.Close()
+	assert.Equal(t, http.StatusOK, resp1.StatusCode)
+
+	// Unix socket works.
+	client := &http.Client{
+		Transport: &http.Transport{
+			DialContext: func(_ context.Context, _, _ string) (net.Conn, error) {
+				return net.Dial("unix", socketPath)
+			},
+		},
+	}
+	resp2, err := client.Get("http://unix/healthz")
+	require.NoError(t, err)
+	defer resp2.Body.Close()
+	assert.Equal(t, http.StatusOK, resp2.StatusCode)
 }

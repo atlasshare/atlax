@@ -95,3 +95,88 @@ func TestClientListener_Addr_UnstartedPortReturnsNil(t *testing.T) {
 	cl := testClientListener(t)
 	assert.Nil(t, cl.Addr(55555))
 }
+
+// --- handleClient coverage tests ---
+
+func TestClientListener_HandleClient_NoMapping(t *testing.T) {
+	cl := testClientListener(t)
+
+	// handleClient with a port that has no routing entry.
+	server, client := net.Pipe()
+	defer server.Close()
+
+	cl.handleClient(context.Background(), client, 55555)
+
+	// Client connection should be closed by handleClient.
+	buf := make([]byte, 1)
+	_, err := client.Read(buf)
+	assert.Error(t, err, "connection should be closed after no-mapping rejection")
+}
+
+func TestClientListener_HandleClient_RateLimited(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
+
+	// Add a port mapping so lookup succeeds.
+	require.NoError(t, router.AddPortMapping("customer-001", 19094, "http", 0))
+
+	// Set a very restrictive rate limit: 1 req/s, burst 1.
+	cl.SetRateLimiter("customer-001", 1, 1)
+
+	// First connection consumes the burst.
+	c1s, c1c := net.Pipe()
+	defer c1s.Close()
+	cl.handleClient(context.Background(), c1c, 19094)
+
+	// Second connection should be rate-limited.
+	c2s, c2c := net.Pipe()
+	defer c2s.Close()
+	cl.handleClient(context.Background(), c2c, 19094)
+
+	// The rate-limited connection should be closed.
+	buf := make([]byte, 1)
+	_, err := c2c.Read(buf)
+	assert.Error(t, err, "connection should be closed after rate limit rejection")
+}
+
+func TestClientListener_HandleClient_RouteFails(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
+
+	// Port mapped but no agent registered -- Route will fail.
+	require.NoError(t, router.AddPortMapping("customer-001", 19095, "http", 0))
+
+	server, client := net.Pipe()
+	defer server.Close()
+	defer client.Close()
+
+	// This should not panic; Route fails with "agent not found".
+	cl.handleClient(context.Background(), client, 19095)
+}
+
+func TestClientListener_SetRateLimiter(t *testing.T) {
+	cl := testClientListener(t)
+
+	// Zero RPS is a no-op.
+	cl.SetRateLimiter("customer-001", 0, 10)
+	cl.mu.Lock()
+	_, exists := cl.rateLimiters["customer-001"]
+	cl.mu.Unlock()
+	assert.False(t, exists, "zero rps should not create a limiter")
+
+	// Negative RPS is a no-op.
+	cl.SetRateLimiter("customer-002", -1, 10)
+	cl.mu.Lock()
+	_, exists = cl.rateLimiters["customer-002"]
+	cl.mu.Unlock()
+	assert.False(t, exists, "negative rps should not create a limiter")
+
+	// Positive RPS creates a limiter.
+	cl.SetRateLimiter("customer-003", 100, 50)
+	cl.mu.Lock()
+	_, exists = cl.rateLimiters["customer-003"]
+	cl.mu.Unlock()
+	assert.True(t, exists, "positive rps should create a limiter")
+}

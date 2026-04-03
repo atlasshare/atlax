@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -266,4 +267,12 @@ func TestPortRouter_StreamLimitZeroIsUnlimited(t *testing.T) {
 		time.Sleep(50 * time.Millisecond)
 		c1.Close()
 	}
+}
+
+func TestPortRouter_SetMetrics(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+	m := NewMetrics("test", prometheus.NewRegistry())
+	router.SetMetrics(m)
+	assert.NotNil(t, router.metrics)
 }
