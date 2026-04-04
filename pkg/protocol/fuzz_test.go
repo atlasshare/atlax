@@ -16,6 +16,7 @@ func FuzzReadFrame(f *testing.F) {
 		CmdStreamOpen, CmdStreamData, CmdStreamClose, CmdStreamReset,
 		CmdPing, CmdPong, CmdWindowUpdate, CmdGoAway,
 		CmdUDPBind, CmdUDPData, CmdUDPUnbind,
+		CmdUpdateManifest, CmdUpdateBinary,
 	} {
 		frame := validFrame(cmd, 0, nil)
 		f.Add(frame)

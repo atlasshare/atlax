@@ -21,32 +21,36 @@ const (
 type Command byte
 
 const (
-	CmdStreamOpen   Command = 0x01
-	CmdStreamData   Command = 0x02
-	CmdStreamClose  Command = 0x03
-	CmdStreamReset  Command = 0x04
-	CmdPing         Command = 0x05
-	CmdPong         Command = 0x06
-	CmdWindowUpdate Command = 0x07
-	CmdGoAway       Command = 0x08
-	CmdUDPBind      Command = 0x09
-	CmdUDPData      Command = 0x0A
-	CmdUDPUnbind    Command = 0x0B
+	CmdStreamOpen     Command = 0x01
+	CmdStreamData     Command = 0x02
+	CmdStreamClose    Command = 0x03
+	CmdStreamReset    Command = 0x04
+	CmdPing           Command = 0x05
+	CmdPong           Command = 0x06
+	CmdWindowUpdate   Command = 0x07
+	CmdGoAway         Command = 0x08
+	CmdUDPBind        Command = 0x09
+	CmdUDPData        Command = 0x0A
+	CmdUDPUnbind      Command = 0x0B
+	CmdUpdateManifest Command = 0x0C
+	CmdUpdateBinary   Command = 0x0D
 )
 
 // commandNames maps valid commands to their wire protocol names.
 var commandNames = map[Command]string{
-	CmdStreamOpen:   "STREAM_OPEN",
-	CmdStreamData:   "STREAM_DATA",
-	CmdStreamClose:  "STREAM_CLOSE",
-	CmdStreamReset:  "STREAM_RESET",
-	CmdPing:         "PING",
-	CmdPong:         "PONG",
-	CmdWindowUpdate: "WINDOW_UPDATE",
-	CmdGoAway:       "GOAWAY",
-	CmdUDPBind:      "UDP_BIND",
-	CmdUDPData:      "UDP_DATA",
-	CmdUDPUnbind:    "UDP_UNBIND",
+	CmdStreamOpen:     "STREAM_OPEN",
+	CmdStreamData:     "STREAM_DATA",
+	CmdStreamClose:    "STREAM_CLOSE",
+	CmdStreamReset:    "STREAM_RESET",
+	CmdPing:           "PING",
+	CmdPong:           "PONG",
+	CmdWindowUpdate:   "WINDOW_UPDATE",
+	CmdGoAway:         "GOAWAY",
+	CmdUDPBind:        "UDP_BIND",
+	CmdUDPData:        "UDP_DATA",
+	CmdUDPUnbind:      "UDP_UNBIND",
+	CmdUpdateManifest: "UPDATE_MANIFEST",
+	CmdUpdateBinary:   "UPDATE_BINARY",
 }
 
 // String returns the human-readable name of the command.
