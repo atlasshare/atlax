@@ -10,10 +10,10 @@ import (
 	"syscall"
 	"time"
 
-	"github.com/atlasshare/atlax/internal/audit"
-	"github.com/atlasshare/atlax/internal/config"
 	"github.com/atlasshare/atlax/pkg/agent"
+	"github.com/atlasshare/atlax/pkg/audit"
 	"github.com/atlasshare/atlax/pkg/auth"
+	"github.com/atlasshare/atlax/pkg/config"
 )
 
 func main() {
