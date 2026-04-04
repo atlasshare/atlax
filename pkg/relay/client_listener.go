@@ -56,7 +56,18 @@ func (cl *ClientListener) StartPort(
 	if err != nil {
 		return fmt.Errorf("relay: client listener: port %d: %w", port, err)
 	}
+	return cl.StartPortWithListener(ctx, ln, port)
+}
 
+// StartPortWithListener begins accepting client connections on the given
+// listener for the specified port. Use this instead of StartPort when
+// the listener was created externally (e.g., inherited via fd passing
+// for zero-downtime restart). Blocks until ctx is canceled.
+func (cl *ClientListener) StartPortWithListener(
+	ctx context.Context,
+	ln net.Listener,
+	port int,
+) error {
 	cl.mu.Lock()
 	cl.listeners[port] = ln
 	cl.mu.Unlock()
