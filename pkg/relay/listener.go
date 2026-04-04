@@ -50,14 +50,21 @@ func NewAgentListener(cfg AgentListenerConfig) *AgentListener {
 	}
 }
 
-// Start begins accepting agent TLS connections. Blocks until ctx is
-// canceled.
+// Start creates a TLS listener and begins accepting agent connections.
+// Blocks until ctx is canceled.
 func (l *AgentListener) Start(ctx context.Context) error {
 	ln, err := tls.Listen("tcp", l.addr, l.tlsConfig)
 	if err != nil {
 		return fmt.Errorf("relay: agent listener: %w", err)
 	}
+	return l.StartWithListener(ctx, ln)
+}
 
+// StartWithListener begins accepting agent TLS connections on the given
+// listener. Use this instead of Start when the listener was created
+// externally (e.g., inherited via fd passing for zero-downtime restart).
+// Blocks until ctx is canceled.
+func (l *AgentListener) StartWithListener(ctx context.Context, ln net.Listener) error {
 	l.logger.Info("relay: agent listener started", "addr", ln.Addr())
 
 	go func() {
