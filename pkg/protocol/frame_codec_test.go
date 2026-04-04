@@ -538,6 +538,8 @@ func TestCommandString(t *testing.T) {
 		{CmdUDPBind, "UDP_BIND"},
 		{CmdUDPData, "UDP_DATA"},
 		{CmdUDPUnbind, "UDP_UNBIND"},
+		{CmdUpdateManifest, "UPDATE_MANIFEST"},
+		{CmdUpdateBinary, "UPDATE_BINARY"},
 		{Command(0xFF), "UNKNOWN(0xff)"},
 	}
 
@@ -549,11 +551,11 @@ func TestCommandString(t *testing.T) {
 }
 
 func TestCommandIsValid(t *testing.T) {
-	for cmd := CmdStreamOpen; cmd <= CmdUDPUnbind; cmd++ {
+	for cmd := CmdStreamOpen; cmd <= CmdUpdateBinary; cmd++ {
 		assert.True(t, cmd.IsValid(), "command 0x%02x should be valid", cmd)
 	}
 	assert.False(t, Command(0x00).IsValid())
-	assert.False(t, Command(0x0C).IsValid())
+	assert.False(t, Command(0x0E).IsValid())
 	assert.False(t, Command(0xFF).IsValid())
 }
 
