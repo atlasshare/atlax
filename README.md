@@ -4,6 +4,7 @@
 [![codecov](https://codecov.io/gh/atlasshare/atlax/branch/main/graph/badge.svg)](https://codecov.io/gh/atlasshare/atlax)
 [![License](https://img.shields.io/badge/License-Apache%202.0-blue.svg)](LICENSE)
 [![Go](https://img.shields.io/badge/Go-1.25+-00ADD8.svg)](https://go.dev)
+[![Release](https://img.shields.io/github/v/release/atlasshare/atlax)](https://github.com/atlasshare/atlax/releases)
 
 A reverse TLS tunnel with TCP stream multiplexing, built in Go. Exposes local services on nodes behind CGNAT through a public relay, using mTLS for authentication and a custom binary wire protocol for performance.
 
@@ -69,7 +70,13 @@ Client (internet)                     Relay (VPS)                    Your Server
 - **Structured audit logging** -- Async JSON events for connect, disconnect, auth success/failure
 - **Prometheus metrics** -- Per-customer counters for streams, connections, and rejections
 - **Heartbeat monitoring** -- Periodic PING/PONG detects dead tunnels
-- **Exponential backoff reconnection** -- Agent reconnects with jitter to avoid thundering herd
+- **Exponential backoff reconnection** -- Agent reconnects in-process with jitter (no systemd restart needed)
+- **Idle timeout** -- Forwarding sessions with no data transfer are cleaned up automatically
+- **Stream ID recycling** -- LIFO free list prevents ID exhaustion under sustained load
+- **Certificate hot-reload** -- Poll-based rotation detects new certs without relay restart
+- **Admin API** -- Unix socket REST API for runtime port management, agent listing, and stats
+- **Hardened deployment** -- Distroless Docker images, systemd sandboxing (NoNewPrivileges, ReadOnlyPaths)
+- **Fuzz tested** -- 895K executions across frame codec and UDP parser, zero crashes
 
 ## Quick Start
 
@@ -394,24 +401,13 @@ Each client connection becomes a stream. Streams are multiplexed over the single
 
 See [Protocol Documentation](docs/protocol/) for the full specification.
 
-## Community vs Enterprise
+## Enterprise Edition
 
-| Feature | Community | Enterprise |
-|---------|:---------:|:----------:|
-| Reverse TLS tunnel | Yes | Yes |
-| TCP stream multiplexing | Yes | Yes |
-| mTLS authentication (TLS 1.3) | Yes | Yes |
-| Multi-service routing | Yes | Yes |
-| Multi-tenant isolation | Yes | Yes |
-| Per-customer rate limiting | Yes | Yes |
-| Structured audit logging | Yes | Yes |
-| In-memory agent registry | Yes | Yes |
-| Distributed registry (Redis/etcd) | -- | Yes |
-| Multi-relay clustering | -- | Yes |
-| SIEM audit integration | -- | Yes |
-| Web management dashboard | -- | Yes |
-| Auto-scaling relay pools | -- | Yes |
-| Priority support and SLA | -- | Yes |
+The community edition is fully functional for single-relay, single-agent-per-customer deployments. For organizations that need distributed infrastructure -- multi-relay clustering, Redis-backed agent registry, Vault certificate automation, SIEM audit integration, zero-downtime binary swap, and agent self-update -- the enterprise edition is available as a commercial product.
+
+Enterprise binaries are drop-in replacements: same config format, same wire protocol, same ports.
+
+For enterprise inquiries, contact **licensing@atlasshare.io**.
 
 ## Documentation
 
@@ -448,10 +444,10 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/atlax-agent-linux ./cmd/ag
 | Phase 2: Agent | Complete | mTLS auth, tunnel client, service forwarder |
 | Phase 3: Relay | Complete | Agent registry, traffic router, relay binary |
 | Phase 4: Multi-tenancy | Complete | Per-customer limits, rate limiting, isolation |
-| Phase 5: Production Hardening | Planned | Health checks, metrics wiring, load testing |
-| Phase 6: Operations | Planned | Terraform, monitoring dashboards, runbooks |
+| Phase 5: Production Hardening | Complete | Reconnection, idle timeout, stream recycling, cert rotation, load testing |
+| Phase 6: Operations | Complete | Systemd/Docker hardening, Prometheus/Grafana, fuzz testing, admin API, v0.1.0 release |
 
-237 tests, 88% coverage, 12 interfaces implemented.
+Current release: [v0.1.1](https://github.com/atlasshare/atlax/releases). 270+ tests, 88% relay coverage, 86%+ overall.
 
 ## Contributing
 
