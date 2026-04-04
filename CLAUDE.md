@@ -26,13 +26,12 @@ pkg/protocol/    Wire protocol: frame encoding, stream multiplexing, flow contro
 pkg/relay/       Relay server: TLS listener, agent registry, traffic routing
 pkg/agent/       Tunnel agent: connection management, local service forwarding
 pkg/auth/        mTLS configuration, certificate management, identity extraction
-internal/config/ Configuration loading from YAML + env var overrides
-internal/audit/  Append-only audit event emission for lifecycle events
+pkg/config/      Configuration loading from YAML + env var overrides
+pkg/audit/       Append-only audit event emission for lifecycle events
 ```
 
-- `pkg/` — Public API, importable by other projects
-- `internal/` — Private to this module, not importable externally
-- `cmd/` — Binary entry points, minimal logic
+- `pkg/` -- Public API, importable by other projects (including enterprise module)
+- `cmd/` -- Binary entry points, minimal logic
 
 ## Wire Protocol
 

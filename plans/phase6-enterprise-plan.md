@@ -70,9 +70,9 @@ github.com/atlasshare/atlax                    (public, Apache 2.0)
   pkg/auth/certs.go                            CertificateStore interface
   pkg/auth/certs_impl.go                       FileStore (community impl)
   pkg/auth/mtls.go                             TLSConfigurator interface, Configurator impl
-  internal/audit/audit.go                      Emitter interface, Event, Action types
-  internal/audit/emitter.go                    SlogEmitter (community impl)
-  internal/config/config.go                    Config types (shared by both editions)
+  pkg/audit/audit.go                           Emitter interface, Event, Action types
+  pkg/audit/emitter.go                         SlogEmitter (community impl)
+  pkg/config/config.go                         Config types (shared by both editions)
   cmd/relay/main.go                            Wires MemoryRegistry, FileStore, SlogEmitter
   cmd/agent/main.go                            Wires FileStore, no self-update
   docs/api/interfaces.md                       Interface stability contract (NEW in Step 6)
@@ -90,7 +90,7 @@ github.com/atlasshare/atlax-enterprise         (private, commercial license)
   pkg/update/updater.go                        Agent self-update system
   pkg/update/manifest.go                       VersionManifest types + signature verification
   pkg/update/updater_test.go                   Self-update tests (mock manifest server)
-  internal/config/enterprise.go                Enterprise config extensions
+  pkg/config/enterprise.go                Enterprise config extensions
   cmd/relay/main.go                            Wires RedisRegistry, VaultStore, SIEMEmitter, fd-passing
   cmd/agent/main.go                            Wires VaultStore, self-updater
   Makefile                                     Build targets mirroring community
@@ -244,7 +244,7 @@ The enterprise `main.go` files initially wire the same community implementations
   - `pkg/relay.Server` (3 methods: Start, Stop, Addr)
   - `pkg/auth.CertificateStore` (3 methods: LoadCertificate, LoadCertificateAuthority, WatchForRotation)
   - `pkg/auth.TLSConfigurator` (2 methods: ServerTLSConfig, ClientTLSConfig)
-  - `internal/audit.Emitter` (2 methods: Emit, Close)
+  - `pkg/audit.Emitter` (2 methods: Emit, Close)
 - [ ] Document stability rules:
   - Adding methods to an existing interface is a breaking change
   - New extension points use new interfaces, not method additions
@@ -255,7 +255,7 @@ The enterprise `main.go` files initially wire the same community implementations
   - `auth.CertRotationConfig`, `auth.CertInfo`, `auth.Identity`, `auth.TLSPaths`, `auth.TLSOption`
   - `audit.Event`, `audit.Action` (all constants)
   - `config.RelayConfig`, `config.AgentConfig`, `config.UpdateConfig` and all nested config types
-- [ ] Note that `internal/audit` is importable by enterprise because Go module boundaries allow it (enterprise is a separate module, not a package within the community module). Clarify this is intentional.
+- [ ] Note that `pkg/audit` and `pkg/config` were moved from `internal/` to `pkg/` in v0.1.1 specifically to allow enterprise module imports.
 
 #### 6.2: Enterprise go.mod
 
@@ -274,8 +274,8 @@ The enterprise `main.go` files initially wire the same community implementations
 - [ ] Create `cmd/relay/main.go` in the enterprise repo
 - [ ] Structure mirrors community `cmd/relay/main.go` exactly (same `run()` pattern, same signal handling, same graceful shutdown)
 - [ ] Import community packages:
-  - `github.com/atlasshare/atlax/internal/audit`
-  - `github.com/atlasshare/atlax/internal/config`
+  - `github.com/atlasshare/atlax/pkg/audit`
+  - `github.com/atlasshare/atlax/pkg/config`
   - `github.com/atlasshare/atlax/pkg/auth`
   - `github.com/atlasshare/atlax/pkg/relay`
   - `github.com/prometheus/client_golang/prometheus`
@@ -292,8 +292,8 @@ The enterprise `main.go` files initially wire the same community implementations
 - [ ] Create `cmd/agent/main.go` in the enterprise repo
 - [ ] Structure mirrors community `cmd/agent/main.go` exactly
 - [ ] Import community packages:
-  - `github.com/atlasshare/atlax/internal/audit`
-  - `github.com/atlasshare/atlax/internal/config`
+  - `github.com/atlasshare/atlax/pkg/audit`
+  - `github.com/atlasshare/atlax/pkg/config`
   - `github.com/atlasshare/atlax/pkg/agent`
   - `github.com/atlasshare/atlax/pkg/auth`
 - [ ] Initially wire community implementations as placeholders:
@@ -305,7 +305,7 @@ The enterprise `main.go` files initially wire the same community implementations
 #### 6.5: Enterprise Makefile
 
 - [ ] Create `Makefile` mirroring community build targets
-- [ ] Version info via ldflags (same pattern as community, but using `github.com/atlasshare/atlax-enterprise/internal/config` if enterprise has its own version, or the community `internal/config` path)
+- [ ] Version info via ldflags (same pattern as community, but using `github.com/atlasshare/atlax/pkg/config` if enterprise has its own version, or the community `internal/config` path)
 - [ ] Targets:
   - `build`: Build `bin/atlax-relay-enterprise` and `bin/atlax-agent-enterprise`
   - `build-relay`: Build relay binary only
@@ -699,7 +699,7 @@ Local connections (agents connected to THIS relay instance) are also tracked in 
 
 #### 8a.5: Enterprise config extension
 
-- [ ] Create `internal/config/enterprise.go` with:
+- [ ] Create `pkg/config/enterprise.go` with:
   - `type EnterpriseRelayConfig struct` embedding `config.RelayConfig` and adding:
     - `Redis RedisConfig`
     - `Vault VaultConfig` (placeholder for Step 8b)

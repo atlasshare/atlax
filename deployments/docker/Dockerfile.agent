@@ -15,9 +15,9 @@ COPY . .
 
 RUN CGO_ENABLED=0 GOOS=linux go build \
     -ldflags="-s -w \
-    -X github.com/atlasshare/atlax/internal/config.Version=${VERSION} \
-    -X github.com/atlasshare/atlax/internal/config.Commit=${COMMIT} \
-    -X github.com/atlasshare/atlax/internal/config.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+    -X github.com/atlasshare/atlax/pkg/config.Version=${VERSION} \
+    -X github.com/atlasshare/atlax/pkg/config.Commit=${COMMIT} \
+    -X github.com/atlasshare/atlax/pkg/config.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)" \
     -o /atlax-agent ./cmd/agent/
 
 # Stage 2: Runtime

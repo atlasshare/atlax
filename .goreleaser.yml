@@ -14,9 +14,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/atlasshare/atlax/internal/config.Version={{.Version}}
-      - -X github.com/atlasshare/atlax/internal/config.Commit={{.Commit}}
-      - -X github.com/atlasshare/atlax/internal/config.Date={{.Date}}
+      - -X github.com/atlasshare/atlax/pkg/config.Version={{.Version}}
+      - -X github.com/atlasshare/atlax/pkg/config.Commit={{.Commit}}
+      - -X github.com/atlasshare/atlax/pkg/config.Date={{.Date}}
 
   - id: atlax-agent
     main: ./cmd/agent/
@@ -31,9 +31,9 @@ builds:
       - arm64
     ldflags:
       - -s -w
-      - -X github.com/atlasshare/atlax/internal/config.Version={{.Version}}
-      - -X github.com/atlasshare/atlax/internal/config.Commit={{.Commit}}
-      - -X github.com/atlasshare/atlax/internal/config.Date={{.Date}}
+      - -X github.com/atlasshare/atlax/pkg/config.Version={{.Version}}
+      - -X github.com/atlasshare/atlax/pkg/config.Commit={{.Commit}}
+      - -X github.com/atlasshare/atlax/pkg/config.Date={{.Date}}
 
 archives:
   - id: relay-archive
