@@ -8,7 +8,7 @@ import (
 	"net"
 	"time"
 
-	"github.com/atlasshare/atlax/internal/audit"
+	"github.com/atlasshare/atlax/pkg/audit"
 	"github.com/atlasshare/atlax/pkg/auth"
 	"github.com/atlasshare/atlax/pkg/protocol"
 )

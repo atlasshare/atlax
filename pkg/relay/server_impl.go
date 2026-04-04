@@ -6,7 +6,7 @@ import (
 	"log/slog"
 	"net"
 
-	"github.com/atlasshare/atlax/internal/config"
+	"github.com/atlasshare/atlax/pkg/config"
 )
 
 // Relay orchestrates the agent listener, client listener, registry,

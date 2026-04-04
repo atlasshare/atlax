@@ -10,8 +10,8 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/atlasshare/atlax/internal/audit"
-	"github.com/atlasshare/atlax/internal/config"
+	"github.com/atlasshare/atlax/pkg/audit"
+	"github.com/atlasshare/atlax/pkg/config"
 )
 
 func TestRelay_StopWithoutStart(t *testing.T) {

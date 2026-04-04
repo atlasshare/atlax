@@ -10,9 +10,9 @@ DATE       ?= $(shell date -u '+%Y-%m-%dT%H:%M:%SZ')
 GO         := go
 GOFLAGS    ?=
 LDFLAGS    := -s -w \
-	-X github.com/atlasshare/atlax/internal/config.Version=$(VERSION) \
-	-X github.com/atlasshare/atlax/internal/config.Commit=$(COMMIT) \
-	-X github.com/atlasshare/atlax/internal/config.Date=$(DATE)
+	-X github.com/atlasshare/atlax/pkg/config.Version=$(VERSION) \
+	-X github.com/atlasshare/atlax/pkg/config.Commit=$(COMMIT) \
+	-X github.com/atlasshare/atlax/pkg/config.Date=$(DATE)
 
 # Output
 BIN_DIR    := bin

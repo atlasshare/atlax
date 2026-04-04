@@ -15,7 +15,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/atlasshare/atlax/internal/audit"
+	"github.com/atlasshare/atlax/pkg/audit"
 )
 
 func testCertsDir() string {

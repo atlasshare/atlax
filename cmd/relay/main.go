@@ -12,9 +12,9 @@ import (
 
 	"github.com/prometheus/client_golang/prometheus"
 
-	"github.com/atlasshare/atlax/internal/audit"
-	"github.com/atlasshare/atlax/internal/config"
+	"github.com/atlasshare/atlax/pkg/audit"
 	"github.com/atlasshare/atlax/pkg/auth"
+	"github.com/atlasshare/atlax/pkg/config"
 	"github.com/atlasshare/atlax/pkg/relay"
 )
 

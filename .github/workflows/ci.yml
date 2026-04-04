@@ -129,9 +129,9 @@ jobs:
         run: >
           go build
           -ldflags="-s -w
-          -X github.com/atlasshare/atlax/internal/config.Version=${{ github.sha }}
-          -X github.com/atlasshare/atlax/internal/config.Commit=${{ github.sha }}
-          -X github.com/atlasshare/atlax/internal/config.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          -X github.com/atlasshare/atlax/pkg/config.Version=${{ github.sha }}
+          -X github.com/atlasshare/atlax/pkg/config.Commit=${{ github.sha }}
+          -X github.com/atlasshare/atlax/pkg/config.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           -o bin/atlax-relay-${{ matrix.goos }}-${{ matrix.goarch }}
           ./cmd/relay/
 
@@ -143,9 +143,9 @@ jobs:
         run: >
           go build
           -ldflags="-s -w
-          -X github.com/atlasshare/atlax/internal/config.Version=${{ github.sha }}
-          -X github.com/atlasshare/atlax/internal/config.Commit=${{ github.sha }}
-          -X github.com/atlasshare/atlax/internal/config.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
+          -X github.com/atlasshare/atlax/pkg/config.Version=${{ github.sha }}
+          -X github.com/atlasshare/atlax/pkg/config.Commit=${{ github.sha }}
+          -X github.com/atlasshare/atlax/pkg/config.Date=$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           -o bin/atlax-agent-${{ matrix.goos }}-${{ matrix.goarch }}
           ./cmd/agent/
 
