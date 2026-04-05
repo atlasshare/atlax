@@ -21,7 +21,8 @@ relay:
 
 tls:
   # Agent client certificate (signed by Customer Intermediate CA)
-  cert_file: /etc/atlax/certs/agent.crt
+  # Use chain cert (agent.crt + customer-ca.crt), not bare cert.
+  cert_file: /etc/atlax/certs/agent-chain.crt
   key_file: /etc/atlax/certs/agent.key
 
   # Root CA certificate for verifying the relay server certificate chain

@@ -74,7 +74,7 @@ Client (internet)                     Relay (VPS)                    Your Server
 - **Idle timeout** -- Forwarding sessions with no data transfer are cleaned up automatically
 - **Stream ID recycling** -- LIFO free list prevents ID exhaustion under sustained load
 - **Certificate hot-reload** -- Poll-based rotation detects new certs without relay restart
-- **Admin API** -- Unix socket REST API for runtime port management, agent listing, and stats
+- **Admin API** -- TCP REST API for health checks, Prometheus metrics, runtime port management, and agent listing. Unix socket is opt-in.
 - **Hardened deployment** -- Distroless Docker images, systemd sandboxing (NoNewPrivileges, ReadOnlyPaths)
 - **Fuzz tested** -- 895K executions across frame codec and UDP parser, zero crashes
 
@@ -183,7 +183,7 @@ make certs-dev
 ```bash
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/atlax-relay-linux ./cmd/relay/
 scp bin/atlax-relay-linux <VPS>:~/atlax/bin/atlax-relay
-scp certs/relay.crt certs/relay.key certs/root-ca.crt certs/customer-ca.crt <VPS>:~/atlax/certs/
+scp certs/relay-chain.crt certs/relay.key certs/root-ca.crt certs/customer-ca.crt <VPS>:~/atlax/certs/
 ```
 
 ### 3. Create the relay config on the VPS
@@ -193,13 +193,12 @@ server:
   listen_addr: 0.0.0.0:8443
   shutdown_grace_period: 30s
 tls:
-  cert_file: ./certs/relay.crt
+  cert_file: ./certs/relay-chain.crt
   key_file: ./certs/relay.key
   ca_file: ./certs/root-ca.crt
   client_ca_file: ./certs/customer-ca.crt
 customers:
   - id: customer-dev-001
-    max_streams: 100
     ports:
       - port: 18080
         service: http
@@ -214,7 +213,7 @@ logging:
 ```bash
 GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/atlax-agent-linux ./cmd/agent/
 scp bin/atlax-agent-linux <HOME_SERVER>:~/atlax/bin/atlax-agent
-scp certs/agent.crt certs/agent.key certs/relay-ca.crt <HOME_SERVER>:~/atlax/certs/
+scp certs/agent-chain.crt certs/agent.key certs/root-ca.crt <HOME_SERVER>:~/atlax/certs/
 ```
 
 ### 5. Create the agent config
@@ -226,9 +225,9 @@ relay:
   keepalive_interval: 30s
   keepalive_timeout: 10s
 tls:
-  cert_file: ./certs/agent.crt
+  cert_file: ./certs/agent-chain.crt
   key_file: ./certs/agent.key
-  ca_file: ./certs/relay-ca.crt
+  ca_file: ./certs/root-ca.crt
 services:
   - name: http
     local_addr: 127.0.0.1:3000
@@ -324,7 +323,6 @@ Each customer gets their own ports and their own agent certificate. Traffic is i
 ```yaml
 customers:
   - id: customer-acme
-    max_streams: 50
     ports:
       - port: 18080
         service: http
@@ -334,7 +332,6 @@ customers:
         listen_addr: 127.0.0.1
 
   - id: customer-globex
-    max_streams: 100
     ports:
       - port: 19080
         service: http
@@ -447,7 +444,7 @@ GOOS=linux GOARCH=amd64 CGO_ENABLED=0 go build -o bin/atlax-agent-linux ./cmd/ag
 | Phase 5: Production Hardening | Complete | Reconnection, idle timeout, stream recycling, cert rotation, load testing |
 | Phase 6: Operations | Complete | Systemd/Docker hardening, Prometheus/Grafana, fuzz testing, admin API, v0.1.0 release |
 
-Current release: [v0.1.1](https://github.com/atlasshare/atlax/releases). 270+ tests, 88% relay coverage, 86%+ overall.
+Current release: [v0.1.1](https://github.com/atlasshare/atlax/releases). 280+ tests, 88% relay coverage, 86%+ overall. Production-benchmarked: 200 concurrent streams at 0% error on a t3.micro.
 
 ## Contributing
 
