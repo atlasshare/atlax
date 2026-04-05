@@ -131,7 +131,10 @@ func (a *AdminServer) Start(ctx context.Context) error {
 
 	// Unix socket listener
 	if a.socketPath != "" {
-		os.Remove(a.socketPath) // clean up stale socket
+		if removeErr := os.Remove(a.socketPath); removeErr != nil && !os.IsNotExist(removeErr) {
+			a.logger.Warn("admin: could not remove stale socket",
+				"path", a.socketPath, "error", removeErr)
+		}
 		unixLn, err := net.Listen("unix", a.socketPath)
 		if err != nil {
 			// Socket-only mode (no TCP): fail because there is no fallback.
