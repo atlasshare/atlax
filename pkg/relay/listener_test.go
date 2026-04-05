@@ -91,14 +91,14 @@ func TestAgentListener_MaxStreamsPerAgentFromConfig(t *testing.T) {
 	})
 	assert.Equal(t, 512, listener.maxStreamsPerAgent)
 
-	// Zero value should default to 256
+	// Zero value should default to 50
 	listenerDefault := NewAgentListener(AgentListenerConfig{
 		Addr:     "127.0.0.1:0",
 		Registry: reg,
 		Emitter:  emitter,
 		Logger:   slog.Default(),
 	})
-	assert.Equal(t, 256, listenerDefault.maxStreamsPerAgent)
+	assert.Equal(t, 50, listenerDefault.maxStreamsPerAgent)
 }
 
 func TestAgentListener_AcceptsAndRegisters(t *testing.T) {

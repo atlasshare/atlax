@@ -110,7 +110,7 @@ func (c *TunnelClient) Connect(ctx context.Context) error {
 	}
 
 	mux := protocol.NewMuxSession(conn, protocol.RoleAgent, protocol.MuxConfig{
-		MaxConcurrentStreams: 256,
+		MaxConcurrentStreams: 50,
 		InitialStreamWindow:  262144,
 		ConnectionWindow:     1048576,
 		PingInterval:         c.config.HeartbeatInterval,
