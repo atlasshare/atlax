@@ -10,6 +10,10 @@ server:
   # Address for the admin/metrics API
   admin_addr: ":9090"
 
+  # Unix socket for admin API (optional, empty = TCP only).
+  # Requires RuntimeDirectory=atlax in the systemd unit.
+  # admin_socket: /run/atlax/atlax.sock
+
   # Maximum number of concurrent agent connections
   max_agents: 1000
 

@@ -453,3 +453,105 @@ func TestAdmin_StartBothTCPAndUnix(t *testing.T) {
 	defer resp2.Body.Close()
 	assert.Equal(t, http.StatusOK, resp2.StatusCode)
 }
+
+// --- Socket failure resilience tests (#87) ---
+
+func TestAdmin_SocketFailureFallsBackToTCP(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	tcpAddr := ln.Addr().String()
+	ln.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Unwritable socket path -- should warn and fall back to TCP.
+	admin := NewAdminServer(AdminConfig{
+		Addr:           tcpAddr,
+		SocketPath:     "/nonexistent/dir/atlax.sock",
+		Registry:       reg,
+		Router:         router,
+		ClientListener: cl,
+		Logger:         slog.Default(),
+	})
+
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- admin.Start(ctx)
+	}()
+	time.Sleep(150 * time.Millisecond)
+
+	// TCP listener should be reachable despite socket failure.
+	resp, err := http.Get("http://" + tcpAddr + "/healthz")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	// Start should not have returned an error.
+	select {
+	case startErr := <-errCh:
+		t.Fatalf("Start() returned unexpectedly: %v", startErr)
+	default:
+		// Still running -- correct.
+	}
+}
+
+func TestAdmin_SocketFailureOnlySocket(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Socket-only mode (no Addr) with unwritable path -- should fail.
+	admin := NewAdminServer(AdminConfig{
+		SocketPath:     "/nonexistent/dir/atlax.sock",
+		Registry:       reg,
+		Router:         router,
+		ClientListener: cl,
+		Logger:         slog.Default(),
+	})
+
+	err := admin.Start(ctx)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "unix socket")
+}
+
+func TestAdmin_EmptySocketPath(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	tcpAddr := ln.Addr().String()
+	ln.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	// Empty socket path -- TCP only, no socket attempted.
+	admin := NewAdminServer(AdminConfig{
+		Addr:           tcpAddr,
+		SocketPath:     "",
+		Registry:       reg,
+		Router:         router,
+		ClientListener: cl,
+		Logger:         slog.Default(),
+	})
+
+	go func() {
+		admin.Start(ctx) //nolint:errcheck // stopped via ctx cancel
+	}()
+	time.Sleep(150 * time.Millisecond)
+
+	resp, err := http.Get("http://" + tcpAddr + "/healthz")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
