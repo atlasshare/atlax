@@ -83,10 +83,10 @@ func TestAgentListener_MaxStreamsPerAgentFromConfig(t *testing.T) {
 
 	// Explicit value should be stored
 	listener := NewAgentListener(AgentListenerConfig{
-		Addr:              "127.0.0.1:0",
-		Registry:          reg,
-		Emitter:           emitter,
-		Logger:            slog.Default(),
+		Addr:               "127.0.0.1:0",
+		Registry:           reg,
+		Emitter:            emitter,
+		Logger:             slog.Default(),
 		MaxStreamsPerAgent: 512,
 	})
 	assert.Equal(t, 512, listener.maxStreamsPerAgent)

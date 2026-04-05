@@ -23,22 +23,22 @@ type AgentListener struct {
 	emitter            audit.Emitter
 	logger             *slog.Logger
 	maxAgents          int
-	maxStreamsPerAgent  int
+	maxStreamsPerAgent int
 }
 
 // AgentListenerConfig holds settings for the agent listener.
 type AgentListenerConfig struct {
-	Addr              string
-	TLSConfig         *tls.Config
-	Registry          AgentRegistry
-	Emitter           audit.Emitter
-	Logger            *slog.Logger
-	MaxAgents         int
+	Addr               string
+	TLSConfig          *tls.Config
+	Registry           AgentRegistry
+	Emitter            audit.Emitter
+	Logger             *slog.Logger
+	MaxAgents          int
 	MaxStreamsPerAgent int
 }
 
 // NewAgentListener creates an agent listener.
-func NewAgentListener(cfg AgentListenerConfig) *AgentListener {
+func NewAgentListener(cfg AgentListenerConfig) *AgentListener { //nolint:gocritic // hugeParam: cfg is mutated for defaults, pass by value is intentional
 	if cfg.MaxAgents <= 0 {
 		cfg.MaxAgents = 1000
 	}
@@ -46,12 +46,12 @@ func NewAgentListener(cfg AgentListenerConfig) *AgentListener {
 		cfg.MaxStreamsPerAgent = 256
 	}
 	return &AgentListener{
-		addr:              cfg.Addr,
-		tlsConfig:         cfg.TLSConfig,
-		registry:          cfg.Registry,
-		emitter:           cfg.Emitter,
-		logger:            cfg.Logger,
-		maxAgents:         cfg.MaxAgents,
+		addr:               cfg.Addr,
+		tlsConfig:          cfg.TLSConfig,
+		registry:           cfg.Registry,
+		emitter:            cfg.Emitter,
+		logger:             cfg.Logger,
+		maxAgents:          cfg.MaxAgents,
 		maxStreamsPerAgent: cfg.MaxStreamsPerAgent,
 	}
 }
