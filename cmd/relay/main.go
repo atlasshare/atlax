@@ -71,12 +71,13 @@ func run() error {
 	registry.SetMetrics(metrics)
 
 	agentListener := relay.NewAgentListener(relay.AgentListenerConfig{
-		Addr:      cfg.Server.ListenAddr,
-		TLSConfig: tlsCfg,
-		Registry:  registry,
-		Emitter:   emitter,
-		Logger:    logger,
-		MaxAgents: cfg.Server.MaxAgents,
+		Addr:              cfg.Server.ListenAddr,
+		TLSConfig:         tlsCfg,
+		Registry:          registry,
+		Emitter:           emitter,
+		Logger:            logger,
+		MaxAgents:         cfg.Server.MaxAgents,
+		MaxStreamsPerAgent: cfg.Server.MaxStreamsPerAgent,
 	})
 
 	router := relay.NewPortRouter(registry, logger)

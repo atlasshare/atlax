@@ -118,6 +118,7 @@ func (m *MuxSession) OpenStreamWithPayload(ctx context.Context, payload []byte) 
 		InitialWindowSize: m.config.InitialStreamWindow,
 	})
 	m.setupStreamClose(s)
+	m.setupStreamReset(s)
 	m.streams[id] = s
 	m.mu.Unlock()
 
@@ -369,6 +370,7 @@ func (m *MuxSession) handleStreamOpen(f *Frame) {
 	cfg := StreamConfig{InitialWindowSize: m.config.InitialStreamWindow}
 	s := NewStreamSession(f.StreamID, cfg)
 	m.setupStreamClose(s)
+	m.setupStreamReset(s)
 	if len(f.Payload) > 0 {
 		s.SetOpenPayload(f.Payload)
 	}
@@ -438,11 +440,14 @@ func (m *MuxSession) handleStreamReset(f *Frame) {
 	if len(f.Payload) >= 4 {
 		code = binary.BigEndian.Uint32(f.Payload[:4])
 	}
-	s.Reset(code)
+	s.Reset(code) // onReset fires here and may already remove + recycle
 
+	// Only remove if onReset did not already handle it.
 	m.mu.Lock()
-	delete(m.streams, f.StreamID)
-	m.freeIDs = append(m.freeIDs, f.StreamID)
+	if _, stillPresent := m.streams[f.StreamID]; stillPresent {
+		delete(m.streams, f.StreamID)
+		m.freeIDs = append(m.freeIDs, f.StreamID)
+	}
 	m.mu.Unlock()
 }
 
@@ -515,12 +520,19 @@ func (m *MuxSession) maybeRemoveStream(id uint32, s *StreamSession) {
 // removeStream removes a stream by ID (used for cleanup on failed open).
 func (m *MuxSession) removeStream(id uint32) {
 	m.mu.Lock()
-	if s, ok := m.streams[id]; ok {
-		s.Reset(0)
+	s, ok := m.streams[id]
+	if ok {
 		delete(m.streams, id)
 		m.freeIDs = append(m.freeIDs, id)
 	}
 	m.mu.Unlock()
+
+	// Reset after releasing m.mu to avoid deadlock: Reset fires
+	// onReset which acquires m.mu. The map entry is already removed
+	// above, so onReset will see exists==false and skip.
+	if ok {
+		s.Reset(0)
+	}
 }
 
 // setupStreamClose registers the onLocalClose callback so that
@@ -535,6 +547,45 @@ func (m *MuxSession) setupStreamClose(s *StreamSession) {
 			StreamID: streamID,
 		}, PriorityData)
 		m.maybeRemoveStream(streamID, s)
+	})
+}
+
+// setupStreamReset registers the onReset callback so that a local
+// Reset() emits a STREAM_RESET frame on the wire and removes the
+// stream from the session map.
+func (m *MuxSession) setupStreamReset(s *StreamSession) {
+	s.SetOnReset(func(streamID uint32, code uint32) {
+		// Do not emit frames during bulk teardown. MuxSession.Close()
+		// closes closeCh before calling s.Reset() on each stream.
+		select {
+		case <-m.closeCh:
+			return
+		default:
+		}
+
+		// Only send STREAM_RESET and clean up if we still own this
+		// stream. If handleStreamReset already removed it (remote-
+		// initiated reset), skip to avoid reset ping-pong.
+		m.mu.Lock()
+		_, exists := m.streams[streamID]
+		if exists {
+			delete(m.streams, streamID)
+			m.freeIDs = append(m.freeIDs, streamID)
+		}
+		m.mu.Unlock()
+
+		if !exists {
+			return
+		}
+
+		payload := make([]byte, 4)
+		binary.BigEndian.PutUint32(payload, code)
+		m.writeQueue.Enqueue(&Frame{
+			Version:  ProtocolVersion,
+			Command:  CmdStreamReset,
+			StreamID: streamID,
+			Payload:  payload,
+		}, PriorityControl)
 	})
 }
 

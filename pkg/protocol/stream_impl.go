@@ -37,6 +37,12 @@ type StreamSession struct {
 	// STREAM_CLOSE+FIN frame on the wire.
 	onLocalClose   func(uint32)
 	localCloseOnce sync.Once
+
+	// onReset is called once when Reset() is invoked locally. The
+	// MuxSession uses this to emit a STREAM_RESET frame on the wire
+	// and remove the stream from the session map.
+	onReset   func(uint32, uint32) // (streamID, code)
+	resetOnce sync.Once
 }
 
 // NewStreamSession creates a stream in the Idle state.
@@ -126,6 +132,14 @@ func (s *StreamSession) SetOnLocalClose(fn func(uint32)) {
 	s.onLocalClose = fn
 }
 
+// SetOnReset registers a callback invoked once when the stream is reset
+// locally. Called by MuxSession during stream registration.
+func (s *StreamSession) SetOnReset(fn func(uint32, uint32)) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.onReset = fn
+}
+
 // Close initiates a graceful local close (sends FIN). Transitions from
 // Open to HalfClosedLocal, or from HalfClosedRemote to Closed.
 func (s *StreamSession) Close() error {
@@ -203,11 +217,23 @@ func (s *StreamSession) RemoteClose() {
 // Reset immediately terminates the stream from any state.
 func (s *StreamSession) Reset(code uint32) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
+	// StateClosed: already removed from MuxSession by setupStreamClose.
+	// StateReset: already removed by a prior Reset() call via onReset.
+	if s.state == StateReset || s.state == StateClosed {
+		s.mu.Unlock()
+		return
+	}
 	s.state = StateReset
 	s.readBuf.Reset()
 	s.signalClosed()
 	s.cond.Broadcast()
+	s.mu.Unlock()
+
+	s.resetOnce.Do(func() {
+		if s.onReset != nil {
+			s.onReset(s.id, code)
+		}
+	})
 }
 
 // signalClosed closes closedCh exactly once. Must be called with mu held.
