@@ -174,7 +174,7 @@ Both commands should output the certificate path ending with `: OK`.
 
 ## 4. Relay Setup
 
-This section uses the live relay (AWS EC2, 18.207.237.252, Ubuntu 24.04) as the running example.
+This section uses the live relay (AWS EC2, relay.example.com, Ubuntu 24.04) as the running example.
 
 ### 4.1 System Preparation
 
@@ -465,7 +465,7 @@ curl -s http://localhost:9090/ports
 
 ## 5. Agent Setup
 
-This section uses the live agent (Arch Linux, 192.168.1.66, behind CGNAT) as the running example.
+This section uses the live agent (Arch Linux, agent.local, behind CGNAT) as the running example.
 
 ### 5.1 System Preparation
 
@@ -538,7 +538,7 @@ Create `/etc/atlax/agent.yaml`. This example mirrors the live deployment:
 
 ```yaml
 relay:
-  addr: "18.207.237.252:8443"
+  addr: "relay.example.com:8443"
   server_name: "relay.atlax.local"
   reconnect_interval: 5s
   reconnect_max_backoff: 300s
@@ -749,7 +749,7 @@ sudo pacman -S caddy
 Create `/etc/caddy/Caddyfile`. This example mirrors the live deployment:
 
 ```
-rubendev.io {
+app.example.com {
     reverse_proxy localhost:18090
     encode gzip zstd
 
@@ -762,7 +762,7 @@ rubendev.io {
     }
 }
 
-tower.rubendev.io {
+tower.app.example.com {
     @api path /api/*
     reverse_proxy @api localhost:18070
     reverse_proxy localhost:18080
@@ -805,8 +805,8 @@ sudo systemctl enable caddy
 sudo systemctl start caddy
 
 # Verify
-curl -I https://rubendev.io
-curl -I https://tower.rubendev.io
+curl -I https://app.example.com
+curl -I https://tower.app.example.com
 ```
 
 Caddy automatically obtains and renews Let's Encrypt certificates. Ensure ports 80 and 443 are open in the firewall and security group.
@@ -872,7 +872,7 @@ This section provides step-by-step instructions for migrating the live relay and
 
 ### 8.1 Migrate the Relay (AWS EC2, Ubuntu 24.04)
 
-The current relay runs as user `atlax-relay-op` with files in `~/atlax/`. It uses bare `relay.crt` instead of `relay-chain.crt` and has a minimal systemd unit without hardening.
+The current relay runs as user `relay-user` with files in `~/atlax/`. It uses bare `relay.crt` instead of `relay-chain.crt` and has a minimal systemd unit without hardening.
 
 **Step 1: Create group, user, and directories.**
 
@@ -893,17 +893,17 @@ sudo chmod 750 /etc/atlax/certs
 The current setup uses bare `relay.crt`. Create the chain cert from the existing files:
 
 ```bash
-cd /home/atlax-relay-op/atlax/certs
+cd /home/relay-user/atlax/certs
 cat relay.crt relay-ca.crt > relay-chain.crt
 ```
 
 **Step 3: Copy certificates with correct permissions.**
 
 ```bash
-sudo cp /home/atlax-relay-op/atlax/certs/relay-chain.crt /etc/atlax/certs/
-sudo cp /home/atlax-relay-op/atlax/certs/relay.key /etc/atlax/certs/
-sudo cp /home/atlax-relay-op/atlax/certs/root-ca.crt /etc/atlax/certs/
-sudo cp /home/atlax-relay-op/atlax/certs/customer-ca.crt /etc/atlax/certs/
+sudo cp /home/relay-user/atlax/certs/relay-chain.crt /etc/atlax/certs/
+sudo cp /home/relay-user/atlax/certs/relay.key /etc/atlax/certs/
+sudo cp /home/relay-user/atlax/certs/root-ca.crt /etc/atlax/certs/
+sudo cp /home/relay-user/atlax/certs/customer-ca.crt /etc/atlax/certs/
 sudo chown root:atlax /etc/atlax/certs/*
 sudo chmod 644 /etc/atlax/certs/relay-chain.crt /etc/atlax/certs/root-ca.crt /etc/atlax/certs/customer-ca.crt
 sudo chmod 640 /etc/atlax/certs/relay.key
@@ -926,7 +926,7 @@ sudo chmod 640 /etc/atlax/relay.yaml
 **Step 5: Install the binary.**
 
 ```bash
-sudo cp /home/atlax-relay-op/atlax/bin/atlax-relay /usr/local/bin/atlax-relay
+sudo cp /home/relay-user/atlax/bin/atlax-relay /usr/local/bin/atlax-relay
 sudo chmod 755 /usr/local/bin/atlax-relay
 ```
 
@@ -968,7 +968,7 @@ curl -s http://localhost:9090/agents
 # Expected: customer-dev-001 connected
 
 # Test a service through Caddy
-curl -I https://rubendev.io
+curl -I https://app.example.com
 ```
 
 **Step 9: Clean up the old home-directory files.**
@@ -977,13 +977,13 @@ After confirming everything works:
 
 ```bash
 # Remove the old setup (optional, do this after a soak period)
-sudo rm -rf /home/atlax-relay-op/atlax/
-sudo userdel atlax-relay-op
+sudo rm -rf /home/relay-user/atlax/
+sudo userdel relay-user
 ```
 
 ### 8.2 Migrate the Agent (Arch Linux)
 
-The current agent runs as user `rhude667` with files in `~/atlax/`. It uses bare `agent.crt` instead of `agent-chain.crt` and uses `relay-ca.crt` as the CA file instead of `root-ca.crt`.
+The current agent runs as user `agent-user` with files in `~/atlax/`. It uses bare `agent.crt` instead of `agent-chain.crt` and uses `relay-ca.crt` as the CA file instead of `root-ca.crt`.
 
 **Step 1: Create group, user, and directories.**
 
@@ -1002,16 +1002,16 @@ sudo chmod 750 /etc/atlax/certs
 **Step 2: Create chain certificates.**
 
 ```bash
-cd /home/rhude667/atlax/certs
+cd /home/agent-user/atlax/certs
 cat agent.crt customer-ca.crt > agent-chain.crt
 ```
 
 **Step 3: Copy certificates with correct permissions.**
 
 ```bash
-sudo cp /home/rhude667/atlax/certs/agent-chain.crt /etc/atlax/certs/
-sudo cp /home/rhude667/atlax/certs/agent.key /etc/atlax/certs/
-sudo cp /home/rhude667/atlax/certs/root-ca.crt /etc/atlax/certs/
+sudo cp /home/agent-user/atlax/certs/agent-chain.crt /etc/atlax/certs/
+sudo cp /home/agent-user/atlax/certs/agent.key /etc/atlax/certs/
+sudo cp /home/agent-user/atlax/certs/root-ca.crt /etc/atlax/certs/
 sudo chown root:atlax /etc/atlax/certs/*
 sudo chmod 644 /etc/atlax/certs/agent-chain.crt /etc/atlax/certs/root-ca.crt
 sudo chmod 640 /etc/atlax/certs/agent.key
@@ -1034,7 +1034,7 @@ sudo chmod 640 /etc/atlax/agent.yaml
 **Step 5: Install the binary.**
 
 ```bash
-sudo cp /home/rhude667/atlax/bin/atlax-agent /usr/local/bin/atlax-agent
+sudo cp /home/agent-user/atlax/bin/atlax-agent /usr/local/bin/atlax-agent
 sudo chmod 755 /usr/local/bin/atlax-agent
 ```
 
@@ -1066,12 +1066,12 @@ curl -s http://localhost:9090/agents    # Run on relay host
 ```bash
 # From the internet, test each service through the relay
 # SMB (direct)
-smbclient //18.207.237.252:18445/SharedDrive -U guest
+smbclient //relay.example.com:18445/SharedDrive -U guest
 
 # HTTP services (through Caddy)
-curl -I https://rubendev.io
-curl -I https://tower.rubendev.io
-curl https://tower.rubendev.io/api/health
+curl -I https://app.example.com
+curl -I https://tower.app.example.com
+curl https://tower.app.example.com/api/health
 ```
 
 **Step 9: Clean up.**
@@ -1079,7 +1079,7 @@ curl https://tower.rubendev.io/api/health
 After a soak period:
 
 ```bash
-rm -rf /home/rhude667/atlax/
+rm -rf /home/agent-user/atlax/
 ```
 
 ---
@@ -1162,7 +1162,7 @@ openssl verify -CAfile /etc/atlax/certs/root-ca.crt \
 openssl x509 -in /etc/atlax/certs/relay-chain.crt -noout -enddate
 
 # Test TLS connection to relay (from agent host)
-openssl s_client -connect 18.207.237.252:8443 \
+openssl s_client -connect relay.example.com:8443 \
   -CAfile /etc/atlax/certs/root-ca.crt \
   -cert /etc/atlax/certs/agent-chain.crt \
   -key /etc/atlax/certs/agent.key \
@@ -1175,7 +1175,7 @@ openssl s_client -connect 18.207.237.252:8443 \
 
 | Cause | Fix |
 |-------|-----|
-| Port 8443 blocked by egress firewall | Check with `nc -zv 18.207.237.252 8443` from agent host |
+| Port 8443 blocked by egress firewall | Check with `nc -zv relay.example.com 8443` from agent host |
 | Port 8443 not open in relay security group | Add inbound rule for TCP 8443 |
 | Relay not running | Check `systemctl status atlax-relay` on relay host |
 | Wrong relay address in agent config | Verify `relay.addr` matches relay public IP/DNS |
@@ -1245,7 +1245,7 @@ sudo ss -tlnp | grep :18080
 
 | Cause | Fix |
 |-------|-----|
-| Unstable ISP connection | Check with `ping -c 100 18.207.237.252` for packet loss |
+| Unstable ISP connection | Check with `ping -c 100 relay.example.com` for packet loss |
 | Relay restarting due to crashes | Check relay logs for panics or OOM kills |
 | Keepalive timeout too aggressive | Increase `keepalive_timeout` in agent config (e.g., 30s) |
 | Idle timeout too short | Increase `idle_timeout` in relay config |
