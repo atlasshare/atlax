@@ -43,7 +43,7 @@ func NewAgentListener(cfg AgentListenerConfig) *AgentListener { //nolint:gocriti
 		cfg.MaxAgents = 1000
 	}
 	if cfg.MaxStreamsPerAgent <= 0 {
-		cfg.MaxStreamsPerAgent = 256
+		cfg.MaxStreamsPerAgent = 50
 	}
 	return &AgentListener{
 		addr:               cfg.Addr,
