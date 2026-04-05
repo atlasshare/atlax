@@ -24,6 +24,7 @@ type AgentConfig struct {
 type ServerConfig struct {
 	ListenAddr          string        `yaml:"listen_addr"`
 	AdminAddr           string        `yaml:"admin_addr"`
+	AdminSocket         string        `yaml:"admin_socket"`
 	AgentListenAddr     string        `yaml:"agent_listen_addr"`
 	MaxAgents           int           `yaml:"max_agents"`
 	MaxStreamsPerAgent  int           `yaml:"max_streams_per_agent"`

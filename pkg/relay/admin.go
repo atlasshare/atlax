@@ -134,23 +134,27 @@ func (a *AdminServer) Start(ctx context.Context) error {
 		os.Remove(a.socketPath) // clean up stale socket
 		unixLn, err := net.Listen("unix", a.socketPath)
 		if err != nil {
-			return fmt.Errorf("admin: unix socket: %w", err)
-		}
-		os.Chmod(a.socketPath, 0o660) //nolint:errcheck // best-effort permissions
-
-		a.logger.Info("relay: admin socket started", "path", a.socketPath)
-
-		if a.server.Addr == "" {
-			// Socket only, no TCP
-			return a.serve(unixLn)
-		}
-
-		// Both socket and TCP
-		go func() {
-			if err := a.serve(unixLn); err != nil {
-				a.logger.Error("admin: unix socket error", "error", err)
+			// Socket-only mode (no TCP): fail because there is no fallback.
+			if a.server.Addr == "" {
+				return fmt.Errorf("admin: unix socket: %w", err)
 			}
-		}()
+			// Dual mode: warn and continue with TCP only.
+			a.logger.Warn("admin: unix socket failed, continuing with TCP only",
+				"path", a.socketPath, "error", err)
+		} else {
+			os.Chmod(a.socketPath, 0o660) //nolint:errcheck // best-effort permissions
+			a.logger.Info("relay: admin socket started", "path", a.socketPath)
+
+			if a.server.Addr == "" {
+				return a.serve(unixLn)
+			}
+
+			go func() {
+				if serveErr := a.serve(unixLn); serveErr != nil {
+					a.logger.Error("admin: unix socket error", "error", serveErr)
+				}
+			}()
+		}
 	}
 
 	// TCP listener

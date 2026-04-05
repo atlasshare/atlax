@@ -114,7 +114,7 @@ func run() error {
 	// Start admin server (health check + metrics + CRUD API)
 	admin := relay.NewAdminServer(relay.AdminConfig{
 		Addr:           cfg.Server.AdminAddr,
-		SocketPath:     "/var/run/atlax.sock",
+		SocketPath:     cfg.Server.AdminSocket,
 		Registry:       registry,
 		Router:         router,
 		ClientListener: clientListener,

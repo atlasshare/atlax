@@ -30,6 +30,8 @@ RestrictRealtime=yes
 MemoryDenyWriteExecute=yes
 LockPersonality=yes
 
+# Creates /run/atlax/ owned by service user. Required if admin_socket is set.
+RuntimeDirectory=atlax
 ReadWritePaths=/var/lib/atlax /var/log/atlax
 ReadOnlyPaths=/etc/atlax
 

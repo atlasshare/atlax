@@ -6,26 +6,30 @@ The relay exposes an HTTP API for health checks, Prometheus metrics, and runtime
 
 ## Transport
 
-### Unix Domain Socket (default)
-
-Path: `/var/run/atlax.sock` (configurable via `SocketPath` in `AdminConfig`)
-
-Permissions: `0660` -- access controlled by filesystem permissions. No authentication required.
-
-```bash
-# Query health via socket
-curl --unix-socket /var/run/atlax.sock http://localhost/healthz
-```
-
-### TCP (optional)
+### TCP (default)
 
 Address: configured via `admin_addr` in `relay.yaml` (e.g., `127.0.0.1:9090`).
 
-No authentication on community edition. Enterprise edition adds bearer token authentication for remote fleet management over TCP.
+No authentication on community edition. Bind to `127.0.0.1` to restrict to local access. Enterprise edition adds bearer token authentication for remote fleet management.
+
+### Unix Domain Socket (opt-in)
+
+Path: configured via `admin_socket` in `relay.yaml` (e.g., `/run/atlax/atlax.sock`). Empty by default (disabled).
+
+Permissions: `0660` -- access controlled by filesystem permissions. No authentication required.
+
+When using systemd, add `RuntimeDirectory=atlax` to the unit file so `/run/atlax/` is created with the correct ownership.
+
+```bash
+# Query health via socket
+curl --unix-socket /run/atlax/atlax.sock http://localhost/healthz
+```
+
+If the socket path is configured but creation fails (e.g., permission denied), the admin server logs a warning and continues with TCP only. If socket-only mode is configured (no `admin_addr`), socket failure is fatal.
 
 ### Dual Mode
 
-Both transports can run simultaneously. If both `SocketPath` and `Addr` are configured, the admin server listens on both.
+Both transports can run simultaneously. If both `admin_socket` and `admin_addr` are configured, the admin server listens on both. Socket failure in dual mode is non-fatal.
 
 ---
 
@@ -209,4 +213,4 @@ The community admin API remains fully functional for single-relay deployments.
 
 ## Integration with ats CLI
 
-The `ats` CLI tool (in the `atlax-tools` repo) detects the unix socket at `/var/run/atlax.sock` and uses it for admin operations. When the socket is not available, `ats` falls back to direct config file editing.
+The `ats` CLI tool (in the `atlax-tools` repo) detects the unix socket at the configured path and uses it for admin operations. When the socket is not available, `ats` falls back to the TCP admin address or direct config file editing.

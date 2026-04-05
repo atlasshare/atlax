@@ -164,6 +164,34 @@ services: []
 	assert.Empty(t, cfg.Services)
 }
 
+func TestLoadRelayConfig_AdminSocket(t *testing.T) {
+	yaml := `
+server:
+  listen_addr: ":8443"
+  admin_addr: ":9090"
+  admin_socket: /run/atlax/atlax.sock
+tls:
+  cert_file: /relay.crt
+  key_file: /relay.key
+  client_ca_file: /customer-ca.crt
+customers:
+  - id: "customer-001"
+`
+	path := writeConfig(t, yaml)
+	loader := NewFileLoader()
+	cfg, err := loader.LoadRelayConfig(path)
+	require.NoError(t, err)
+	assert.Equal(t, "/run/atlax/atlax.sock", cfg.Server.AdminSocket)
+}
+
+func TestLoadRelayConfig_AdminSocketEmpty(t *testing.T) {
+	path := writeConfig(t, validRelayYAML)
+	loader := NewFileLoader()
+	cfg, err := loader.LoadRelayConfig(path)
+	require.NoError(t, err)
+	assert.Empty(t, cfg.Server.AdminSocket)
+}
+
 func TestLoadRelayConfig_MissingFile(t *testing.T) {
 	loader := NewFileLoader()
 	_, err := loader.LoadRelayConfig("/nonexistent/relay.yaml")
