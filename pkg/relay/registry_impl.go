@@ -76,6 +76,9 @@ func (r *MemoryRegistry) Register(
 		r.mu.Unlock()
 		r.logger.Info("relay: replacing existing agent connection",
 			"customer_id", customerID)
+		if r.metrics != nil {
+			r.metrics.ConnectionUnregistered(customerID)
+		}
 		old.Muxer().GoAway(0) //nolint:errcheck // best-effort GoAway
 		old.Close()
 	} else {

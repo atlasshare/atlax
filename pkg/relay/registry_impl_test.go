@@ -159,6 +159,45 @@ func TestMemoryRegistry_SetMetrics(t *testing.T) {
 	assert.NotNil(t, reg.metrics)
 }
 
+func TestMemoryRegistry_ReplaceDecrementsConnectionGauge(t *testing.T) {
+	promReg := prometheus.NewRegistry()
+	m := NewMetrics("test_replace", promReg)
+
+	reg := testRegistry()
+	reg.SetMetrics(m)
+
+	conn1, agentMux1 := testConnectionPair("customer-001")
+	conn2, agentMux2 := testConnectionPair("customer-001")
+	conn3, agentMux3 := testConnectionPair("customer-001")
+	defer agentMux1.Close()
+	defer agentMux2.Close()
+	defer agentMux3.Close()
+
+	ctx := context.Background()
+
+	// Register first connection: gauge = 1
+	require.NoError(t, reg.Register(ctx, "customer-001", conn1))
+
+	// Replace with second: gauge should still be 1 (not 2)
+	require.NoError(t, reg.Register(ctx, "customer-001", conn2))
+
+	// Replace with third: gauge should still be 1 (not 3)
+	require.NoError(t, reg.Register(ctx, "customer-001", conn3))
+
+	// Collect the gauge value
+	metrics, err := promReg.Gather()
+	require.NoError(t, err)
+
+	var gaugeValue float64
+	for _, mf := range metrics {
+		if mf.GetName() == "test_replace_connections_active" {
+			gaugeValue = mf.GetMetric()[0].GetGauge().GetValue()
+		}
+	}
+	assert.Equal(t, float64(1), gaugeValue,
+		"connections_active gauge should be 1 after two replacements, not %v", gaugeValue)
+}
+
 func TestMemoryRegistry_SetCustomerLimit(t *testing.T) {
 	reg := testRegistry()
 	reg.SetCustomerLimit("customer-001", 5)
