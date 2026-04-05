@@ -75,6 +75,32 @@ func agentTLSConfig(t *testing.T) *tls.Config {
 	}
 }
 
+func TestAgentListener_MaxStreamsPerAgentFromConfig(t *testing.T) {
+	emitter := audit.NewSlogEmitter(slog.Default(), 16)
+	defer emitter.Close()
+
+	reg := NewMemoryRegistry(slog.Default())
+
+	// Explicit value should be stored
+	listener := NewAgentListener(AgentListenerConfig{
+		Addr:               "127.0.0.1:0",
+		Registry:           reg,
+		Emitter:            emitter,
+		Logger:             slog.Default(),
+		MaxStreamsPerAgent: 512,
+	})
+	assert.Equal(t, 512, listener.maxStreamsPerAgent)
+
+	// Zero value should default to 256
+	listenerDefault := NewAgentListener(AgentListenerConfig{
+		Addr:     "127.0.0.1:0",
+		Registry: reg,
+		Emitter:  emitter,
+		Logger:   slog.Default(),
+	})
+	assert.Equal(t, 256, listenerDefault.maxStreamsPerAgent)
+}
+
 func TestAgentListener_AcceptsAndRegisters(t *testing.T) {
 	skipIfNoCerts(t)
 

@@ -17,36 +17,42 @@ import (
 // handshake, extracts identity, creates MuxSessions, and registers
 // agents in the registry.
 type AgentListener struct {
-	addr      string
-	tlsConfig *tls.Config
-	registry  AgentRegistry
-	emitter   audit.Emitter
-	logger    *slog.Logger
-	maxAgents int
+	addr               string
+	tlsConfig          *tls.Config
+	registry           AgentRegistry
+	emitter            audit.Emitter
+	logger             *slog.Logger
+	maxAgents          int
+	maxStreamsPerAgent int
 }
 
 // AgentListenerConfig holds settings for the agent listener.
 type AgentListenerConfig struct {
-	Addr      string
-	TLSConfig *tls.Config
-	Registry  AgentRegistry
-	Emitter   audit.Emitter
-	Logger    *slog.Logger
-	MaxAgents int
+	Addr               string
+	TLSConfig          *tls.Config
+	Registry           AgentRegistry
+	Emitter            audit.Emitter
+	Logger             *slog.Logger
+	MaxAgents          int
+	MaxStreamsPerAgent int
 }
 
 // NewAgentListener creates an agent listener.
-func NewAgentListener(cfg AgentListenerConfig) *AgentListener {
+func NewAgentListener(cfg AgentListenerConfig) *AgentListener { //nolint:gocritic // hugeParam: cfg is mutated for defaults, pass by value is intentional
 	if cfg.MaxAgents <= 0 {
 		cfg.MaxAgents = 1000
 	}
+	if cfg.MaxStreamsPerAgent <= 0 {
+		cfg.MaxStreamsPerAgent = 256
+	}
 	return &AgentListener{
-		addr:      cfg.Addr,
-		tlsConfig: cfg.TLSConfig,
-		registry:  cfg.Registry,
-		emitter:   cfg.Emitter,
-		logger:    cfg.Logger,
-		maxAgents: cfg.MaxAgents,
+		addr:               cfg.Addr,
+		tlsConfig:          cfg.TLSConfig,
+		registry:           cfg.Registry,
+		emitter:            cfg.Emitter,
+		logger:             cfg.Logger,
+		maxAgents:          cfg.MaxAgents,
+		maxStreamsPerAgent: cfg.MaxStreamsPerAgent,
 	}
 }
 
@@ -124,7 +130,7 @@ func (l *AgentListener) handleConnection(ctx context.Context, conn net.Conn) {
 	l.emitAudit(ctx, audit.ActionAuthSuccess, conn.RemoteAddr().String(), customerID)
 
 	mux := protocol.NewMuxSession(conn, protocol.RoleRelay, protocol.MuxConfig{
-		MaxConcurrentStreams: 256,
+		MaxConcurrentStreams: l.maxStreamsPerAgent,
 		InitialStreamWindow:  262144,
 		ConnectionWindow:     1048576,
 		PingInterval:         30 * time.Second,

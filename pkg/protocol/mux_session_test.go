@@ -903,6 +903,207 @@ func TestMuxSession_StreamIDRecyclingPreservesParity(t *testing.T) {
 	assert.Equal(t, uint32(1), s1.ID()%2, "recycled ID should be odd for relay")
 }
 
+// --- Reset cleanup tests (regression for #84: stream leak) ---
+
+func TestMuxSession_ResetRemovesStreamFromMap(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	relayStream, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+
+	_, err = agent.AcceptStream(ctx)
+	require.NoError(t, err)
+
+	assert.Equal(t, 1, relay.NumStreams())
+
+	// Reset the stream (same path as copyBidirectional cleanup)
+	relayStream.(*StreamSession).Reset(0)
+
+	// Wait for cleanup
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, 0, relay.NumStreams(),
+		"Reset() must remove stream from MuxSession.streams map")
+}
+
+func TestMuxSession_ResetSendsFrameToRemote(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	relayStream, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+
+	agentStream, err := agent.AcceptStream(ctx)
+	require.NoError(t, err)
+
+	// Reset on relay side should send STREAM_RESET to agent
+	relayStream.(*StreamSession).Reset(0)
+
+	time.Sleep(200 * time.Millisecond)
+
+	assert.Equal(t, StateReset, agentStream.(*StreamSession).State(),
+		"agent stream should be Reset after relay sends STREAM_RESET")
+	assert.Equal(t, 0, agent.NumStreams(),
+		"agent should also remove the stream from its map")
+}
+
+func TestMuxSession_ResetIsIdempotent(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	relayStream, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+
+	_, err = agent.AcceptStream(ctx)
+	require.NoError(t, err)
+
+	ss := relayStream.(*StreamSession)
+
+	// Call Reset twice -- should not panic
+	ss.Reset(0)
+	ss.Reset(0)
+
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, StateReset, ss.State())
+	assert.Equal(t, 0, relay.NumStreams())
+}
+
+func TestMuxSession_ResetAfterClose(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	relayStream, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+
+	_, err = agent.AcceptStream(ctx)
+	require.NoError(t, err)
+
+	ss := relayStream.(*StreamSession)
+
+	// Close first (graceful), then Reset
+	require.NoError(t, relayStream.Close())
+	ss.Reset(0)
+
+	time.Sleep(100 * time.Millisecond)
+
+	// Stream should be removed regardless of path
+	assert.Equal(t, 0, relay.NumStreams())
+}
+
+func TestMuxSession_ResetStreamIDRecycled(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Open stream, get ID 1
+	s1, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+	id1 := s1.ID()
+
+	_, err = agent.AcceptStream(ctx)
+	require.NoError(t, err)
+
+	// Reset it
+	s1.(*StreamSession).Reset(0)
+	time.Sleep(100 * time.Millisecond)
+
+	assert.Equal(t, 0, relay.NumStreams())
+
+	// Open another -- should recycle id1
+	s2, err := relay.OpenStream(ctx)
+	require.NoError(t, err)
+
+	_, err = agent.AcceptStream(ctx)
+	require.NoError(t, err)
+
+	assert.Equal(t, id1, s2.ID(),
+		"stream ID should be recycled after Reset")
+}
+
+func TestMuxSession_BulkCloseNoResetFrames(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	// Open 5 streams
+	for range 5 {
+		_, err := relay.OpenStream(ctx)
+		require.NoError(t, err)
+		_, err = agent.AcceptStream(ctx)
+		require.NoError(t, err)
+	}
+
+	assert.Equal(t, 5, relay.NumStreams())
+
+	// Close the session (bulk teardown). This calls s.Reset(0) on
+	// each stream internally. The onReset callback should detect
+	// closeCh is closed and skip sending individual STREAM_RESET
+	// frames.
+	relay.Close()
+
+	assert.Equal(t, 0, relay.NumStreams())
+
+	// Agent should eventually see the transport close.
+	// The key assertion: no panic, no deadlock.
+	time.Sleep(200 * time.Millisecond)
+}
+
+func TestMuxSession_ResetHighChurn(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+
+	// Open and reset 50 streams (same pattern as production traffic)
+	for i := range 50 {
+		s, err := relay.OpenStream(ctx)
+		require.NoError(t, err, "open iteration %d", i)
+
+		_, err = agent.AcceptStream(ctx)
+		require.NoError(t, err, "accept iteration %d", i)
+
+		s.(*StreamSession).Reset(0)
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	// Wait for all remote cleanup
+	time.Sleep(300 * time.Millisecond)
+
+	assert.Equal(t, 0, relay.NumStreams(),
+		"all relay streams must be cleaned up after reset")
+	assert.Equal(t, 0, agent.NumStreams(),
+		"all agent streams must be cleaned up after reset")
+
+	// Open 50 more -- should all succeed (proves no leak)
+	for i := range 50 {
+		s, err := relay.OpenStream(ctx)
+		require.NoError(t, err, "second round open iteration %d", i)
+
+		_, err = agent.AcceptStream(ctx)
+		require.NoError(t, err, "second round accept iteration %d", i)
+
+		s.(*StreamSession).Reset(0)
+		time.Sleep(20 * time.Millisecond)
+	}
+
+	time.Sleep(300 * time.Millisecond)
+
+	assert.Equal(t, 0, relay.NumStreams())
+	assert.Equal(t, 0, agent.NumStreams())
+}
+
 func TestMuxSession_StreamIDHighChurn(t *testing.T) {
 	relay, agent := newMuxPair(t)
 
