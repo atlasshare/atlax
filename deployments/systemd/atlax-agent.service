@@ -15,8 +15,6 @@ RestartSec=5s
 
 EnvironmentFile=-/etc/atlax/agent.env
 
-WatchdogSec=30s
-
 # Security hardening
 NoNewPrivileges=yes
 ProtectSystem=strict

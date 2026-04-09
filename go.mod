@@ -1,6 +1,6 @@
 module github.com/atlasshare/atlax
 
-go 1.25.8
+go 1.25.9
 
 require (
 	github.com/stretchr/testify v1.11.1
