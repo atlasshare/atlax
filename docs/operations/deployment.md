@@ -23,15 +23,15 @@ Both binaries are configured through YAML files with environment variable overri
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ATLAX_RELAY_LISTEN_ADDR` | TLS listen address for agent connections | `:8443` |
-| `ATLAX_RELAY_CERT_FILE` | Path to relay TLS certificate | `/etc/atlax/relay.crt` |
+| `ATLAX_RELAY_CERT_FILE` | Path to relay TLS certificate chain | `/etc/atlax/relay-chain.crt` |
 | `ATLAX_RELAY_KEY_FILE` | Path to relay TLS private key | `/etc/atlax/relay.key` |
-| `ATLAX_RELAY_CA_FILE` | Path to customer CA bundle for mTLS | `/etc/atlax/customer-ca.crt` |
+| `ATLAX_RELAY_CA_FILE` | Path to root CA certificate | `/etc/atlax/root-ca.crt` |
 | `ATLAX_RELAY_METRICS_ADDR` | Prometheus metrics listen address | `:9090` |
 | `ATLAX_RELAY_HEALTH_ADDR` | Health check HTTP listen address | `:8080` |
 | `ATLAX_RELAY_LOG_LEVEL` | Log level (debug, info, warn, error) | `info` |
 | `ATLAX_RELAY_LOG_FORMAT` | Log format (json, text) | `json` |
 | `ATLAX_RELAY_MAX_AGENTS` | Maximum concurrent agent connections | `1000` |
-| `ATLAX_RELAY_MAX_STREAMS_PER_AGENT` | Maximum streams per agent | `100` |
+| `ATLAX_RELAY_MAX_STREAMS_PER_AGENT` | Maximum streams per agent (enterprise only) | `50` |
 | `ATLAX_RELAY_IDLE_TIMEOUT` | Idle connection timeout | `5m` |
 
 ### Agent Environment Variables
@@ -39,9 +39,9 @@ Both binaries are configured through YAML files with environment variable overri
 | Variable | Description | Default |
 |----------|-------------|---------|
 | `ATLAX_AGENT_RELAY_ADDR` | Relay server address (host:port) | required |
-| `ATLAX_AGENT_CERT_FILE` | Path to agent mTLS certificate | `/etc/atlax/agent.crt` |
+| `ATLAX_AGENT_CERT_FILE` | Path to agent mTLS certificate chain | `/etc/atlax/agent-chain.crt` |
 | `ATLAX_AGENT_KEY_FILE` | Path to agent mTLS private key | `/etc/atlax/agent.key` |
-| `ATLAX_AGENT_CA_FILE` | Path to relay CA for verification | `/etc/atlax/relay-ca.crt` |
+| `ATLAX_AGENT_CA_FILE` | Path to root CA for verification | `/etc/atlax/root-ca.crt` |
 | `ATLAX_AGENT_LOG_LEVEL` | Log level (debug, info, warn, error) | `info` |
 | `ATLAX_AGENT_LOG_FORMAT` | Log format (json, text) | `json` |
 | `ATLAX_AGENT_RECONNECT_BACKOFF_MAX` | Maximum reconnection backoff | `60s` |

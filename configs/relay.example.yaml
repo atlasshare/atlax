@@ -17,8 +17,9 @@ server:
   # Maximum number of concurrent agent connections
   max_agents: 1000
 
-  # Maximum multiplexed streams per agent connection
-  max_streams_per_agent: 100
+  # Maximum multiplexed streams per agent connection.
+  # Community edition: hardcoded to 50. Enterprise edition: configurable.
+  # max_streams_per_agent: 50
 
   # Idle timeout for agent connections with no active streams
   idle_timeout: 300s
@@ -28,7 +29,8 @@ server:
 
 tls:
   # Relay server certificate (signed by Relay Intermediate CA)
-  cert_file: /etc/atlax/certs/relay.crt
+  # Use chain cert (relay.crt + relay-ca.crt), not bare cert.
+  cert_file: /etc/atlax/certs/relay-chain.crt
   key_file: /etc/atlax/certs/relay.key
 
   # Root CA certificate for verifying the certificate chain

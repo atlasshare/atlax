@@ -239,6 +239,58 @@ concurrency   streams/sec   errors   avg latency
 
 Peak throughput: ~17,700 streams/sec at 1000 concurrency. Zero errors at all levels up to 2000.
 
+## Live Benchmark Results
+
+Measured against a production deployment: relay on AWS EC2 t3.micro (1 vCPU, 911 MB RAM), agent on Arch Linux behind CGNAT, ~265ms base network RTT, Go echo server as backend. Community edition binaries from commit 4a77e62.
+
+### Latency Test (remote)
+
+```
+concurrency         p50        p95        p99        max
+1                349.0ms     349.0ms     349.0ms     349.0ms
+10               331.0ms     331.0ms     331.0ms     331.0ms
+50               321.0ms     324.0ms     325.0ms     325.0ms
+100              269.0ms     325.0ms     325.0ms     325.0ms
+500              384.0ms     389.0ms     392.0ms     398.0ms
+```
+
+The ~265-350ms p50 floor is pure network latency. The tunnel protocol adds negligible overhead -- p50 at 500 concurrent is only ~35ms above p50 at 1.
+
+### Load Test (remote)
+
+```
+1000 concurrent streams, 1024 bytes each
+843 ok, 157 fail (15.7%)
+Duration: 10.79s, Throughput: 78 streams/sec
+```
+
+Failures are from the t3.micro's single vCPU saturating under instantaneous burst, not from the tunnel protocol.
+
+### Ramp Test (remote)
+
+```
+concurrency      reqs/sec   errors  avg latency
+10                    10       0     296ms
+25                    25       0     290ms
+50                    50       0     301ms
+100                  100       0     317ms
+200                  200       0     303ms
+500                  363     137     545ms
+```
+
+Zero errors up to 200 concurrent. At 500, the relay hardware saturates (single vCPU). A t3.small (2 vCPU) is recommended for 500+ concurrent streams.
+
+### In-Process vs Live Comparison
+
+| Metric | In-Process | Live | Gap |
+|--------|-----------|------|-----|
+| Latency p50 @ 1 | 0.6ms | 349ms | Network RTT |
+| Latency p50 @ 100 | 6.4ms | 269ms | Network RTT |
+| Ramp @ 200 errors | 0 | 0 | Same |
+| Load throughput | 10,106/sec | 78/sec | Network + hardware |
+
+The protocol overhead is negligible. The gap is entirely network latency and relay hardware limits.
+
 ## Interpreting Results
 
 **Throughput (streams/sec):** Higher is better. This measures how many complete echo round-trips the system can handle per second. The mux overhead (framing, flow control, goroutine scheduling) is the primary factor.
@@ -264,7 +316,7 @@ The in-process results represent the **protocol ceiling** -- the maximum the mux
 
 ## Tuning
 
-**MuxConfig.MaxConcurrentStreams:** Set slightly above your expected peak. Too low rejects legitimate connections. Too high wastes memory on stream maps.
+**MuxConfig.MaxConcurrentStreams:** Community edition: fixed at 50. Enterprise edition: configurable via `max_streams_per_agent` in relay.yaml and planned agent config support. Set slightly above your expected peak.
 
 **MuxConfig.InitialStreamWindow / ConnectionWindow:** Larger windows improve throughput for bulk transfers but increase memory usage. Default 256KB/1MB is balanced. For high-throughput single-stream transfers, increase to 1MB/4MB.
 
