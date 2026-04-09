@@ -651,8 +651,6 @@ RestartSec=5s
 
 EnvironmentFile=-/etc/atlax/agent.env
 
-WatchdogSec=30s
-
 # Security hardening
 NoNewPrivileges=yes
 ProtectSystem=strict
@@ -689,9 +687,9 @@ WantedBy=multi-user.target
 
 Key differences from the relay unit:
 
-- **`WatchdogSec=30s`** -- The agent sends systemd watchdog notifications. If the agent stops responding for 30 seconds, systemd restarts it.
 - **No `CAP_NET_BIND_SERVICE`** -- The agent only makes outbound connections; it never binds privileged ports.
 - **No `RuntimeDirectory`** -- The agent does not use a Unix socket.
+- **No `WatchdogSec`** -- The agent has in-process reconnection supervision (exponential backoff + heartbeat ping) which already handles tunnel failures. A systemd watchdog would require the agent to call `sd_notify(WATCHDOG=1)`, which is not implemented. Restart on crash is still provided by `Restart=always`.
 
 Enable and start:
 
