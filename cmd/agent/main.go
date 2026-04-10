@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -25,6 +27,7 @@ func main() {
 
 func run() error {
 	configPath := flag.String("config", "agent.yaml", "path to agent configuration file")
+	validate := flag.Bool("validate", false, "parse and validate config file, then exit (0=valid, 1=invalid)")
 	flag.Parse()
 
 	// Load configuration
@@ -32,6 +35,18 @@ func run() error {
 	cfg, err := loader.LoadAgentConfig(*configPath)
 	if err != nil {
 		return fmt.Errorf("load config: %w", err)
+	}
+
+	// Pre-flight chain cert validation.
+	if err := auth.ValidateChainCertFile(cfg.TLS.CertFile); err != nil {
+		return fmt.Errorf("validate cert: %w", err)
+	}
+
+	// Dry-run mode: config parsed and validated. Exit cleanly.
+	if *validate {
+		fmt.Fprintf(os.Stderr, "config %s is valid (%d services)\n",
+			*configPath, len(cfg.Services))
+		return nil
 	}
 
 	// Initialize logger
@@ -42,7 +57,7 @@ func run() error {
 	defer emitter.Close()
 
 	// Build mTLS configuration
-	store := auth.NewFileStore()
+	store := auth.NewFileStore(auth.WithLogger(logger))
 	tlsConfigurator := auth.NewConfigurator(store, auth.TLSPaths{
 		CertFile:   cfg.TLS.CertFile,
 		KeyFile:    cfg.TLS.KeyFile,
@@ -104,6 +119,19 @@ func run() error {
 	tunnelDone := make(chan error, 1)
 	go func() {
 		tunnelDone <- tunnel.Start(ctx)
+	}()
+
+	// Start the cert rotation watcher.
+	go func() {
+		watchErr := store.WatchForRotation(ctx,
+			cfg.TLS.CertFile, cfg.TLS.KeyFile,
+			func(cert tls.Certificate) {
+				tlsConfigurator.Reload(cert)
+				logger.Info("agent: cert hot-reloaded")
+			})
+		if watchErr != nil && !errors.Is(watchErr, context.Canceled) {
+			logger.Warn("agent: cert watcher exited", "error", watchErr)
+		}
 	}()
 
 	logger.Info("agent started",
