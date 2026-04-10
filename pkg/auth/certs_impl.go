@@ -103,13 +103,13 @@ func ValidateChainCertFile(path string) error {
 // LoadCertificateAuthority reads one or more PEM-encoded CA certificates
 // and returns an x509.CertPool.
 func (s *FileStore) LoadCertificateAuthority(path string) (*x509.CertPool, error) {
-	pem, err := os.ReadFile(path)
+	pemData, err := os.ReadFile(path)
 	if err != nil {
 		return nil, fmt.Errorf("auth: load ca: %w", err)
 	}
 
 	pool := x509.NewCertPool()
-	if !pool.AppendCertsFromPEM(pem) {
+	if !pool.AppendCertsFromPEM(pemData) {
 		return nil, fmt.Errorf("auth: load ca: no valid certificates in %s", path)
 	}
 	return pool, nil

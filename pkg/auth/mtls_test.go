@@ -117,7 +117,7 @@ func TestConfigurator_Reload_SwapsCertificate(t *testing.T) {
 		filepath.Join(testCertsDir(), "agent.key"),
 	)
 	require.NoError(t, err)
-	cfg.Reload(agentCert)
+	cfg.Reload(&agentCert)
 
 	second, err := tlsCfg.GetCertificate(nil)
 	require.NoError(t, err)

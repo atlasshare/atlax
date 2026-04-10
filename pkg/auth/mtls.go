@@ -95,8 +95,8 @@ func NewConfigurator(store CertificateStore, paths TLSPaths) *Configurator {
 // Safe to call from any goroutine, including concurrent with active
 // TLS handshakes. The new certificate takes effect on the next
 // handshake; existing connections are not torn down.
-func (c *Configurator) Reload(cert tls.Certificate) {
-	c.currentCert.Store(&cert)
+func (c *Configurator) Reload(cert *tls.Certificate) {
+	c.currentCert.Store(cert)
 }
 
 // ServerTLSConfig returns a tls.Config for the relay listener with

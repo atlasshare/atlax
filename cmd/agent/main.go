@@ -126,7 +126,7 @@ func run() error {
 		watchErr := store.WatchForRotation(ctx,
 			cfg.TLS.CertFile, cfg.TLS.KeyFile,
 			func(cert tls.Certificate) {
-				tlsConfigurator.Reload(cert)
+				tlsConfigurator.Reload(&cert)
 				logger.Info("agent: cert hot-reloaded")
 			})
 		if watchErr != nil && !errors.Is(watchErr, context.Canceled) {
