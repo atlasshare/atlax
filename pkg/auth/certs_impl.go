@@ -6,6 +6,7 @@ import (
 	"crypto/tls"
 	"crypto/x509"
 	"encoding/hex"
+	"encoding/pem"
 	"fmt"
 	"log/slog"
 	"os"
@@ -56,6 +57,47 @@ func (s *FileStore) LoadCertificate(certPath, keyPath string) (tls.Certificate, 
 		return tls.Certificate{}, fmt.Errorf("auth: load certificate: %w", err)
 	}
 	return cert, nil
+}
+
+// ValidateChainCertFile reads a PEM file and verifies it contains at
+// least two certificates (a leaf cert followed by an intermediate CA).
+// This is a pre-flight check to catch the common mistake of pointing
+// cert_file at a bare leaf cert -- the TLS handshake then fails with
+// a cryptic "unknown certificate authority" error on the peer side.
+//
+// Returns nil on success. Returns an error that explains what's wrong
+// and how to fix it if the file contains a single certificate.
+func ValidateChainCertFile(path string) error {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return fmt.Errorf("auth: validate chain: read %s: %w", path, err)
+	}
+
+	count := 0
+	rest := data
+	for {
+		var block *pem.Block
+		block, rest = pem.Decode(rest)
+		if block == nil {
+			break
+		}
+		if block.Type == "CERTIFICATE" {
+			count++
+		}
+	}
+
+	if count == 0 {
+		return fmt.Errorf("auth: validate chain: no certificates found in %s", path)
+	}
+	if count == 1 {
+		return fmt.Errorf(
+			"auth: validate chain: %s contains a single certificate (bare leaf, no intermediate CA). "+
+				"atlax requires a chain cert: concatenate the leaf and intermediate CA into a single file "+
+				"(e.g. `cat leaf.crt intermediate.crt > chain.crt`) and point cert_file at the chain",
+			path,
+		)
+	}
+	return nil
 }
 
 // LoadCertificateAuthority reads one or more PEM-encoded CA certificates

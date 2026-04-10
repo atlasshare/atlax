@@ -3,6 +3,7 @@ package auth
 import (
 	"crypto/tls"
 	"fmt"
+	"sync/atomic"
 	"time"
 )
 
@@ -66,10 +67,18 @@ type TLSPaths struct {
 	ServerName   string
 }
 
-// Configurator builds TLS configs from file-based certificates.
+// Configurator builds TLS configs from file-based certificates and
+// supports hot-reload of the leaf certificate via Reload().
 type Configurator struct {
 	store CertificateStore
 	paths TLSPaths
+
+	// currentCert is the live certificate pointer served by the
+	// GetCertificate / GetClientCertificate callbacks in the tls.Config
+	// returned from ServerTLSConfig / ClientTLSConfig. Swapping this
+	// atomically reloads the certificate for the next handshake without
+	// rebuilding the tls.Config.
+	currentCert atomic.Pointer[tls.Certificate]
 }
 
 // Compile-time interface check.
@@ -82,7 +91,19 @@ func NewConfigurator(store CertificateStore, paths TLSPaths) *Configurator {
 	return &Configurator{store: store, paths: paths}
 }
 
-// ServerTLSConfig returns a tls.Config for the relay listener with mTLS.
+// Reload swaps the certificate served by the tls.Config callbacks.
+// Safe to call from any goroutine, including concurrent with active
+// TLS handshakes. The new certificate takes effect on the next
+// handshake; existing connections are not torn down.
+func (c *Configurator) Reload(cert tls.Certificate) {
+	c.currentCert.Store(&cert)
+}
+
+// ServerTLSConfig returns a tls.Config for the relay listener with
+// mTLS. The returned config uses a GetCertificate callback that reads
+// the current certificate from an atomic pointer, so calling Reload()
+// later swaps the certificate for new handshakes without rebuilding
+// the config or restarting the listener.
 func (c *Configurator) ServerTLSConfig(opts ...TLSOption) (*tls.Config, error) {
 	o := tlsOptions{MinVersion: tls.VersionTLS13}
 	for _, fn := range opts {
@@ -93,6 +114,7 @@ func (c *Configurator) ServerTLSConfig(opts ...TLSOption) (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("auth: server tls: %w", err)
 	}
+	c.currentCert.Store(&cert)
 
 	clientCAs, err := c.store.LoadCertificateAuthority(c.paths.ClientCAFile)
 	if err != nil {
@@ -100,14 +122,18 @@ func (c *Configurator) ServerTLSConfig(opts ...TLSOption) (*tls.Config, error) {
 	}
 
 	return &tls.Config{ //nolint:gosec // default is TLS 1.3; WithMinVersion is for testing only
-		MinVersion:   o.MinVersion,
-		Certificates: []tls.Certificate{cert},
-		ClientAuth:   tls.RequireAndVerifyClientCert,
-		ClientCAs:    clientCAs,
+		MinVersion: o.MinVersion,
+		GetCertificate: func(_ *tls.ClientHelloInfo) (*tls.Certificate, error) {
+			return c.currentCert.Load(), nil
+		},
+		ClientAuth: tls.RequireAndVerifyClientCert,
+		ClientCAs:  clientCAs,
 	}, nil
 }
 
-// ClientTLSConfig returns a tls.Config for the agent dialer with mTLS.
+// ClientTLSConfig returns a tls.Config for the agent dialer with
+// mTLS. The returned config uses a GetClientCertificate callback so
+// calling Reload() swaps the certificate for the next handshake.
 func (c *Configurator) ClientTLSConfig(opts ...TLSOption) (*tls.Config, error) {
 	o := tlsOptions{MinVersion: tls.VersionTLS13}
 	for _, fn := range opts {
@@ -118,6 +144,7 @@ func (c *Configurator) ClientTLSConfig(opts ...TLSOption) (*tls.Config, error) {
 	if err != nil {
 		return nil, fmt.Errorf("auth: client tls: %w", err)
 	}
+	c.currentCert.Store(&cert)
 
 	rootCAs, err := c.store.LoadCertificateAuthority(c.paths.CAFile)
 	if err != nil {
@@ -125,10 +152,12 @@ func (c *Configurator) ClientTLSConfig(opts ...TLSOption) (*tls.Config, error) {
 	}
 
 	cfg := &tls.Config{ //nolint:gosec // default is TLS 1.3; WithMinVersion is for testing only
-		MinVersion:   o.MinVersion,
-		Certificates: []tls.Certificate{cert},
-		RootCAs:      rootCAs,
-		ServerName:   c.paths.ServerName,
+		MinVersion: o.MinVersion,
+		GetClientCertificate: func(_ *tls.CertificateRequestInfo) (*tls.Certificate, error) {
+			return c.currentCert.Load(), nil
+		},
+		RootCAs:    rootCAs,
+		ServerName: c.paths.ServerName,
 	}
 
 	if o.SessionCache != nil {
