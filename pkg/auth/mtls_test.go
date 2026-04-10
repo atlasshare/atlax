@@ -29,7 +29,13 @@ func TestConfigurator_ServerTLSConfig_HasRelayCert(t *testing.T) {
 	cfg := relayConfigurator(t)
 	tlsCfg, err := cfg.ServerTLSConfig()
 	require.NoError(t, err)
-	assert.Len(t, tlsCfg.Certificates, 1)
+	// Cert is served via GetCertificate callback (hot-reload path),
+	// not the static Certificates slice.
+	assert.NotNil(t, tlsCfg.GetCertificate)
+	cert, err := tlsCfg.GetCertificate(nil)
+	require.NoError(t, err)
+	require.NotNil(t, cert)
+	assert.NotEmpty(t, cert.Certificate)
 }
 
 func TestConfigurator_ServerTLSConfig_HasClientCAs(t *testing.T) {
@@ -85,7 +91,40 @@ func TestConfigurator_ClientTLSConfig_HasAgentCert(t *testing.T) {
 	cfg := agentConfigurator(t)
 	tlsCfg, err := cfg.ClientTLSConfig()
 	require.NoError(t, err)
-	assert.Len(t, tlsCfg.Certificates, 1)
+	// Cert is served via GetClientCertificate callback (hot-reload path),
+	// not the static Certificates slice.
+	assert.NotNil(t, tlsCfg.GetClientCertificate)
+	cert, err := tlsCfg.GetClientCertificate(nil)
+	require.NoError(t, err)
+	require.NotNil(t, cert)
+	assert.NotEmpty(t, cert.Certificate)
+}
+
+func TestConfigurator_Reload_SwapsCertificate(t *testing.T) {
+	cfg := relayConfigurator(t)
+	tlsCfg, err := cfg.ServerTLSConfig()
+	require.NoError(t, err)
+
+	first, err := tlsCfg.GetCertificate(nil)
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	firstFP := CertFingerprint(first.Certificate[0])
+
+	// Load a different cert (agent.crt is a different leaf) and reload.
+	store := NewFileStore()
+	agentCert, err := store.LoadCertificate(
+		filepath.Join(testCertsDir(), "agent.crt"),
+		filepath.Join(testCertsDir(), "agent.key"),
+	)
+	require.NoError(t, err)
+	cfg.Reload(&agentCert)
+
+	second, err := tlsCfg.GetCertificate(nil)
+	require.NoError(t, err)
+	require.NotNil(t, second)
+	secondFP := CertFingerprint(second.Certificate[0])
+
+	assert.NotEqual(t, firstFP, secondFP, "reloaded cert should differ from initial cert")
 }
 
 func TestConfigurator_ClientTLSConfig_HasRootCAs(t *testing.T) {

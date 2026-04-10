@@ -179,6 +179,37 @@ func testCertsDir() string {
 	return filepath.Join("..", "..", "certs")
 }
 
+func TestValidateChainCertFile_Chain(t *testing.T) {
+	// relay-chain.crt is a proper chain (leaf + intermediate CA).
+	err := ValidateChainCertFile(filepath.Join(testCertsDir(), "relay-chain.crt"))
+	require.NoError(t, err)
+}
+
+func TestValidateChainCertFile_BareCert(t *testing.T) {
+	// relay.crt is a bare leaf certificate.
+	err := ValidateChainCertFile(filepath.Join(testCertsDir(), "relay.crt"))
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "single certificate")
+	assert.Contains(t, err.Error(), "bare leaf")
+	assert.Contains(t, err.Error(), "intermediate")
+}
+
+func TestValidateChainCertFile_Missing(t *testing.T) {
+	err := ValidateChainCertFile("/nonexistent/chain.pem")
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "read")
+}
+
+func TestValidateChainCertFile_Empty(t *testing.T) {
+	tmp := t.TempDir()
+	empty := filepath.Join(tmp, "empty.pem")
+	require.NoError(t, os.WriteFile(empty, []byte("not a cert"), 0o600))
+
+	err := ValidateChainCertFile(empty)
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "no certificates found")
+}
+
 func copyFile(t *testing.T, src, dst string) {
 	t.Helper()
 	data, err := os.ReadFile(src)

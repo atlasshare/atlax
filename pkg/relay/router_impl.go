@@ -29,6 +29,7 @@ type portEntry struct {
 	customerID string
 	service    string
 	maxStreams int
+	listenAddr string
 }
 
 // Compile-time interface check.
@@ -47,15 +48,63 @@ func NewPortRouter(registry AgentRegistry, logger *slog.Logger) *PortRouter {
 }
 
 // AddPortMapping assigns a relay-side port to a customer's service.
-func (r *PortRouter) AddPortMapping(customerID string, port int, service string, maxStreams int) error {
+// The listenAddr is recorded for introspection via the admin API but
+// does not affect routing.
+func (r *PortRouter) AddPortMapping(customerID string, port int, service, listenAddr string, maxStreams int) error {
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.portMap[port] = portEntry{
 		customerID: customerID,
 		service:    service,
 		maxStreams: maxStreams,
+		listenAddr: listenAddr,
 	}
 	return nil
+}
+
+// PortInfo is a read-only view of a port mapping used by the admin API
+// and other callers that need to introspect the router state.
+type PortInfo struct {
+	Port       int
+	CustomerID string
+	Service    string
+	MaxStreams int
+	ListenAddr string
+}
+
+// GetPort returns the full mapping for a single port, or (_, false) if
+// the port is not registered.
+func (r *PortRouter) GetPort(port int) (PortInfo, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	entry, ok := r.portMap[port]
+	if !ok {
+		return PortInfo{}, false
+	}
+	return PortInfo{
+		Port:       port,
+		CustomerID: entry.customerID,
+		Service:    entry.service,
+		MaxStreams: entry.maxStreams,
+		ListenAddr: entry.listenAddr,
+	}, true
+}
+
+// ListPorts returns a snapshot of all port mappings.
+func (r *PortRouter) ListPorts() []PortInfo {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	out := make([]PortInfo, 0, len(r.portMap))
+	for port, entry := range r.portMap {
+		out = append(out, PortInfo{
+			Port:       port,
+			CustomerID: entry.customerID,
+			Service:    entry.service,
+			MaxStreams: entry.maxStreams,
+			ListenAddr: entry.listenAddr,
+		})
+	}
+	return out
 }
 
 // RemovePortMapping releases a previously assigned port mapping.

@@ -12,9 +12,11 @@ type TrafficRouter interface {
 	// customer ID. The port identifies which service to route to.
 	Route(ctx context.Context, customerID string, clientConn net.Conn, port int) error
 
-	// AddPortMapping assigns a relay-side port to a specific service for the
-	// given customer. maxStreams of 0 means unlimited.
-	AddPortMapping(customerID string, port int, service string, maxStreams int) error
+	// AddPortMapping assigns a relay-side port to a specific service for
+	// the given customer. listenAddr is recorded for introspection (the
+	// admin API reports it back) but does not affect routing. maxStreams
+	// of 0 means unlimited.
+	AddPortMapping(customerID string, port int, service, listenAddr string, maxStreams int) error
 
 	// RemovePortMapping releases a previously assigned port mapping.
 	RemovePortMapping(customerID string, port int) error

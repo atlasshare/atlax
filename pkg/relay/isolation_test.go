@@ -21,9 +21,9 @@ func TestCrossTenantIsolation(t *testing.T) {
 	router := NewPortRouter(reg, slog.Default())
 
 	// Customer A: port 19001, service "echo-a"
-	router.AddPortMapping("customer-a", 19001, "echo-a", 0) //nolint:errcheck // test setup
+	router.AddPortMapping("customer-a", 19001, "echo-a", "", 0) //nolint:errcheck // test setup
 	// Customer B: port 19002, service "echo-b"
-	router.AddPortMapping("customer-b", 19002, "echo-b", 0) //nolint:errcheck // test setup
+	router.AddPortMapping("customer-b", 19002, "echo-b", "", 0) //nolint:errcheck // test setup
 
 	// Create mux pairs for both customers
 	relayConnA, agentConnA := net.Pipe()
@@ -134,7 +134,7 @@ func TestCrossTenantIsolation_PortACannotReachAgentB(t *testing.T) {
 	router := NewPortRouter(reg, slog.Default())
 
 	// Only customer-a mapped to port 19001
-	router.AddPortMapping("customer-a", 19001, "echo", 0) //nolint:errcheck // test setup
+	router.AddPortMapping("customer-a", 19001, "echo", "", 0) //nolint:errcheck // test setup
 
 	// Register customer-b (but NOT customer-a)
 	relayConn, agentConn := net.Pipe()

@@ -7,8 +7,11 @@ server:
   # Address for agent TLS connections (mTLS)
   listen_addr: ":8443"
 
-  # Address for the admin/metrics API
-  admin_addr: ":9090"
+  # Address for the admin/metrics API.
+  # NOTE: Port 9090 is also Prometheus's default. If you run Prometheus
+  # on the same host, change one of them (e.g., Prometheus to :9091)
+  # to avoid a bind conflict.
+  admin_addr: "127.0.0.1:9090"
 
   # Unix socket for admin API (optional, empty = TCP only).
   # Requires RuntimeDirectory=atlax in the systemd unit.

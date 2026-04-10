@@ -2,6 +2,8 @@ package main
 
 import (
 	"context"
+	"crypto/tls"
+	"errors"
 	"flag"
 	"fmt"
 	"log/slog"
@@ -27,6 +29,7 @@ func main() {
 
 func run() error {
 	configPath := flag.String("config", "relay.yaml", "path to relay configuration file")
+	validate := flag.Bool("validate", false, "parse and validate config file, then exit (0=valid, 1=invalid)")
 	flag.Parse()
 
 	// Load configuration
@@ -36,6 +39,25 @@ func run() error {
 		return fmt.Errorf("load config: %w", err)
 	}
 
+	// Build port index from customer config (validates port assignments)
+	portIndex, err := config.BuildPortIndex(cfg.Customers)
+	if err != nil {
+		return fmt.Errorf("build port index: %w", err)
+	}
+
+	// Pre-flight chain cert validation. Catches the common footgun of
+	// pointing cert_file at a bare leaf instead of a chain cert.
+	if err := auth.ValidateChainCertFile(cfg.TLS.CertFile); err != nil {
+		return fmt.Errorf("validate cert: %w", err)
+	}
+
+	// Dry-run mode: config parsed and validated. Exit cleanly.
+	if *validate {
+		fmt.Fprintf(os.Stderr, "config %s is valid (%d customers, %d ports)\n",
+			*configPath, len(cfg.Customers), len(portIndex.Entries))
+		return nil
+	}
+
 	// Initialize logger
 	logger := initLogger(cfg.Logging)
 
@@ -43,14 +65,8 @@ func run() error {
 	emitter := audit.NewSlogEmitter(logger, audit.DefaultBufferSize)
 	defer emitter.Close()
 
-	// Build port index from customer config
-	portIndex, err := config.BuildPortIndex(cfg.Customers)
-	if err != nil {
-		return fmt.Errorf("build port index: %w", err)
-	}
-
 	// Build server-side mTLS configuration
-	store := auth.NewFileStore()
+	store := auth.NewFileStore(auth.WithLogger(logger))
 	tlsConfigurator := auth.NewConfigurator(store, auth.TLSPaths{
 		CertFile:     cfg.TLS.CertFile,
 		KeyFile:      cfg.TLS.KeyFile,
@@ -129,6 +145,21 @@ func run() error {
 	serverDone := make(chan error, 1)
 	go func() {
 		serverDone <- server.Start(ctx)
+	}()
+
+	// Start the cert rotation watcher. Polls the cert file for content
+	// changes and calls tlsConfigurator.Reload() so new handshakes use
+	// the updated cert without a process restart.
+	go func() {
+		watchErr := store.WatchForRotation(ctx,
+			cfg.TLS.CertFile, cfg.TLS.KeyFile,
+			func(cert tls.Certificate) {
+				tlsConfigurator.Reload(&cert)
+				logger.Info("relay: cert hot-reloaded")
+			})
+		if watchErr != nil && !errors.Is(watchErr, context.Canceled) {
+			logger.Warn("relay: cert watcher exited", "error", watchErr)
+		}
 	}()
 
 	logger.Info("relay started",
