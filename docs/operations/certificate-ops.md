@@ -239,53 +239,43 @@ cfssl gencert -ca ca.pem -ca-key ca-key.pem \
 5. Deliver the signed certificate and CA bundle to the customer agent.
 6. Record the certificate serial number, customer ID, and expiry date in the certificate inventory.
 
-### Automated Renewal
+### Certificate Rotation (Community Edition)
 
-The agent checks certificate expiry daily and initiates renewal when less than 30 days remain:
+The community edition supports file-based hot-reload: both the relay and agent poll their cert files (default: every 24 hours) and automatically reload when the content changes (SHA-256 fingerprint comparison). No process restart is needed.
 
-1. Agent generates a new key pair (or reuses the existing key, based on configuration).
-2. Agent creates a CSR with the same `CN=customer-{uuid}`.
-3. Agent submits the CSR to the control plane API endpoint (`/api/v1/certs/renew`), authenticated with the current (still valid) mTLS certificate.
-4. Control plane validates the request and signs the CSR with the Customer Intermediate CA.
-5. Agent receives the new certificate, validates the chain, and hot-reloads.
-6. Old certificate remains valid until its original expiry (overlap period).
+**Operator workflow:**
+
+1. Generate a new cert+key pair using the same CA that signed the original.
+2. Create a new chain file: `cat new-leaf.crt intermediate-ca.crt > new-chain.crt`.
+3. Replace the chain file and key on disk at the paths specified in the config (`cert_file`, `key_file`).
+4. Wait up to 24 hours for the next poll cycle, or restart the service for immediate pickup.
+
+**Automated renewal via CA API** (step-ca ACME, Vault PKI `/issue` endpoint) is supported by the enterprise edition. The community edition does not have an automated renewal agent -- cert rotation is operator-initiated.
+
+To generate a new agent cert for an existing customer without regenerating the full CA hierarchy, use the `ats certs issue` command from `atlax-tools`:
+
+```bash
+ats certs issue
+# Prompts for cert dir, customer ID, validity. Signs against existing Customer CA.
+```
 
 ---
 
 ## Revocation
 
-### Certificate Revocation List (CRL)
+The community edition does not implement CRL fetching or OCSP checking. Revocation is enforced by short-lived certificates (90-day default) and operator-initiated disconnection via the admin API.
 
-The relay periodically fetches an updated CRL from the CA and rejects connections from revoked certificates.
+**Practical revocation procedure (community):**
 
-```bash
-# Generate CRL with OpenSSL (development)
-openssl ca -config ca.conf -gencrl -out crl.pem
-
-# With step-ca
-step ca revoke <serial-number>
-
-# With Vault
-vault write pki_customer/revoke serial_number=<serial>
-```
-
-### OCSP (Online Certificate Status Protocol)
-
-For production deployments with step-ca or Vault, enable OCSP responder for real-time certificate status checks.
-
-### Revocation Procedure
-
-1. Identify the certificate to revoke (by serial number or customer ID).
-2. Revoke the certificate in the CA.
-3. Distribute the updated CRL to the relay (or ensure OCSP is checked).
-4. Verify the revoked certificate is rejected:
+1. Identify the compromised agent by customer ID.
+2. Force-disconnect via the admin API:
    ```bash
-   # Attempt connection with revoked cert (should fail)
-   openssl s_client -connect relay.example.com:8443 \
-     -cert revoked-agent.crt -key revoked-agent.key \
-     -CAfile relay-ca.crt
+   curl -X DELETE http://127.0.0.1:9090/agents/{customerID}
    ```
-5. Issue a new certificate to the customer if the revocation was due to compromise (with a new key pair).
+3. Do not re-issue a cert for that customer until the compromise is resolved.
+4. The short 90-day validity limits the exposure window.
+
+For CRL/OCSP enforcement, use the enterprise edition with step-ca or Vault PKI.
 
 ---
 
