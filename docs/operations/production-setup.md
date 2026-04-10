@@ -311,6 +311,8 @@ sudo chmod 640 /etc/atlax/relay.yaml
 
 ### 4.5 Firewall
 
+> **Two-layer firewall on cloud VMs:** If you run atlax on AWS, GCP, Azure, or DigitalOcean, you have two independent firewall layers: the **cloud security group** (or firewall rule) AND the **host firewall** (UFW, firewalld, iptables). **Both must allow the port** for traffic to reach the relay. A common gotcha is opening the cloud security group but forgetting UFW (or vice versa) -- traffic is silently dropped with no error in the relay logs. Always check both layers when debugging connectivity issues.
+
 **UFW (Ubuntu):**
 
 ```bash
@@ -914,6 +916,8 @@ Verify each item after completing setup.
 ---
 
 ## 9. Troubleshooting
+
+> **Tip:** Run `ats health` from [atlax-tools](https://github.com/atlasshare/atlax-tools) for automated diagnostics. It checks config readability, cert validity, TLS handshake, port connectivity, and systemd service state in one command.
 
 ### TLS Handshake Failures
 

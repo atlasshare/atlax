@@ -1,5 +1,7 @@
 # atlax Setup and Testing Guide
 
+> **Recommended:** Use the [`ats` CLI](https://github.com/atlasshare/atlax-tools) for interactive setup. `ats setup relay` and `ats setup agent` automate most of the steps below (PKI, config generation, systemd, firewall). The manual steps in this guide are for operators who prefer full control or need to understand the internals.
+
 This guide walks through setting up atlax in three stages:
 
 1. **Local testing** -- both binaries on localhost
@@ -13,7 +15,7 @@ Tested and verified on 2026-03-30 with real Samba and web app traffic.
 ## Prerequisites
 
 - Go 1.25+ installed on build machine
-- OpenSSL 3.x (for certificate generation)
+- OpenSSL 3.x (for certificate generation), or `ats certs init` from [atlax-tools](https://github.com/atlasshare/atlax-tools)
 - SSH access to the agent host
 - For Stage 3: AWS EC2 instance with Elastic IP
 
