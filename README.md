@@ -80,12 +80,25 @@ Client (internet)                     Relay (VPS)                    Your Server
 
 ## Quick Start
 
-### Prerequisites
+### Recommended: use `ats` (the atlax CLI)
 
-- Go 1.25+
-- OpenSSL 3.x
+The [`ats` CLI](https://github.com/atlasshare/atlax-tools) provides interactive setup wizards, PKI management, health checks, and more. It is the fastest way to go from zero to a working tunnel.
 
-### Build
+```bash
+go install github.com/atlasshare/atlax-tools/cmd/ats@latest
+
+ats certs init       # generate full mTLS certificate hierarchy
+ats setup relay      # interactive relay setup (config, systemd, firewall)
+ats setup agent      # interactive agent setup (config, services, systemd)
+```
+
+See the [atlax-tools README](https://github.com/atlasshare/atlax-tools) for the full command reference and guides.
+
+### Manual: build from source
+
+If you prefer manual setup or need to customize the build:
+
+**Prerequisites:** Go 1.25+, OpenSSL 3.x
 
 ```bash
 git clone https://github.com/atlasshare/atlax.git
@@ -408,7 +421,9 @@ For enterprise inquiries, contact **licensing@atlasshare.io**.
 
 ## Documentation
 
-- [Setup and Testing](docs/operations/setup-and-testing.md) -- Local, LAN, and AWS deployment
+- **[`ats` CLI (atlax-tools)](https://github.com/atlasshare/atlax-tools)** -- Interactive setup, PKI management, health checks, backup/restore
+- [Setup and Testing](docs/operations/setup-and-testing.md) -- Local, LAN, and AWS deployment (manual path)
+- [Admin API Reference](docs/api/control-plane.md) -- REST API for health, metrics, ports, agents
 - [Multi-Tenancy](docs/operations/multi-tenancy.md) -- Isolation model, limits, Caddy pattern
 - [Architecture](docs/architecture/) -- System design and component overview
 - [Protocol](docs/protocol/) -- Wire protocol specification
