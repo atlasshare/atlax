@@ -30,7 +30,7 @@ func TestPortRouter_AddAndLookup(t *testing.T) {
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
 
-	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http", 0))
+	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http", "", 0))
 
 	cid, svc, ok := router.LookupPort(8080)
 	assert.True(t, ok)
@@ -50,7 +50,7 @@ func TestPortRouter_RemovePortMapping(t *testing.T) {
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
 
-	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http", 0))
+	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http", "", 0))
 	require.NoError(t, router.RemovePortMapping("customer-001", 8080))
 
 	_, _, ok := router.LookupPort(8080)
@@ -61,7 +61,7 @@ func TestPortRouter_RemoveWrongCustomer(t *testing.T) {
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
 
-	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http", 0))
+	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http", "", 0))
 	err := router.RemovePortMapping("customer-002", 8080)
 	assert.Error(t, err)
 }
@@ -69,7 +69,7 @@ func TestPortRouter_RemoveWrongCustomer(t *testing.T) {
 func TestPortRouter_RouteNoAgent(t *testing.T) {
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
-	router.AddPortMapping("customer-001", 8080, "http", 0) //nolint:errcheck // test setup, error not relevant
+	router.AddPortMapping("customer-001", 8080, "http", "", 0) //nolint:errcheck // test setup, error not relevant
 
 	c1, c2 := net.Pipe()
 	defer c1.Close()
@@ -87,7 +87,7 @@ func TestPortRouter_RouteEndToEnd(t *testing.T) {
 	// Set up: registry, router, agent mux pair, echo server
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
-	router.AddPortMapping("customer-001", 8080, "echo", 0) //nolint:errcheck // test setup, error not relevant
+	router.AddPortMapping("customer-001", 8080, "echo", "", 0) //nolint:errcheck // test setup, error not relevant
 
 	// Create relay<->agent mux pair
 	relayConn, agentConn := net.Pipe()
@@ -196,7 +196,7 @@ func TestPortRouter_StreamOpenPayloadCarriesServiceName(t *testing.T) {
 func TestPortRouter_StreamLimitEnforced(t *testing.T) {
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
-	router.AddPortMapping("customer-001", 8080, "echo", 1) //nolint:errcheck // test setup, error not relevant
+	router.AddPortMapping("customer-001", 8080, "echo", "", 1) //nolint:errcheck // test setup, error not relevant
 
 	// Create relay<->agent mux pair
 	relayConn, agentConn := net.Pipe()
@@ -235,7 +235,7 @@ func TestPortRouter_StreamLimitEnforced(t *testing.T) {
 func TestPortRouter_StreamLimitZeroIsUnlimited(t *testing.T) {
 	reg := NewMemoryRegistry(slog.Default())
 	router := NewPortRouter(reg, slog.Default())
-	router.AddPortMapping("customer-001", 8080, "echo", 0) //nolint:errcheck // test setup, error not relevant
+	router.AddPortMapping("customer-001", 8080, "echo", "", 0) //nolint:errcheck // test setup, error not relevant
 
 	relayConn, agentConn := net.Pipe()
 	relayMux := protocol.NewMuxSession(relayConn, protocol.RoleRelay, testMuxConfig())

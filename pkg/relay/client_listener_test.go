@@ -119,7 +119,7 @@ func TestClientListener_HandleClient_RateLimited(t *testing.T) {
 	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
 
 	// Add a port mapping so lookup succeeds.
-	require.NoError(t, router.AddPortMapping("customer-001", 19094, "http", 0))
+	require.NoError(t, router.AddPortMapping("customer-001", 19094, "http", "", 0))
 
 	// Set a very restrictive rate limit: 1 req/s, burst 1.
 	cl.SetRateLimiter("customer-001", 1, 1)
@@ -146,7 +146,7 @@ func TestClientListener_HandleClient_RouteFails(t *testing.T) {
 	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
 
 	// Port mapped but no agent registered -- Route will fail.
-	require.NoError(t, router.AddPortMapping("customer-001", 19095, "http", 0))
+	require.NoError(t, router.AddPortMapping("customer-001", 19095, "http", "", 0))
 
 	server, client := net.Pipe()
 	defer server.Close()

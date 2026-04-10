@@ -51,7 +51,7 @@ func (s *Relay) Start(ctx context.Context) error {
 	// Register port mappings from config.
 	for port, entry := range s.portIndex.Entries {
 		if err := s.router.AddPortMapping(
-			entry.CustomerID, port, entry.Service, entry.MaxStreams,
+			entry.CustomerID, port, entry.Service, entry.ListenAddr, entry.MaxStreams,
 		); err != nil {
 			return fmt.Errorf("relay: add port mapping: %w", err)
 		}

@@ -65,6 +65,8 @@ type PortResponse struct {
 	Port       int    `json:"port"`
 	CustomerID string `json:"customer_id"`
 	Service    string `json:"service"`
+	ListenAddr string `json:"listen_addr"`
+	MaxStreams int    `json:"max_streams"`
 }
 
 // AgentResponse represents a connected agent in API responses.
@@ -98,8 +100,9 @@ func NewAdminServer(cfg AdminConfig) *AdminServer {
 
 	mux := http.NewServeMux()
 
-	// Existing endpoints
+	// Liveness + readiness + metrics
 	mux.HandleFunc("/healthz", a.handleHealth)
+	mux.HandleFunc("/readyz", a.handleReady)
 	mux.Handle("/metrics", promhttp.Handler())
 
 	// CRUD endpoints
@@ -198,6 +201,20 @@ func (a *AdminServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// --- Readiness ---
+
+// handleReady returns 200 when the registry is reachable and the admin
+// server is serving requests (which it must be, to handle this call).
+// Distinct from /healthz which counts active agents: /readyz is a
+// liveness+registry probe suitable for ALB target group health checks.
+func (a *AdminServer) handleReady(w http.ResponseWriter, r *http.Request) {
+	if _, err := a.registry.ListConnectedAgents(r.Context()); err != nil {
+		http.Error(w, `{"status":"not ready"}`, http.StatusServiceUnavailable)
+		return
+	}
+	writeJSON(w, map[string]string{"status": "ready"})
+}
+
 // --- Stats ---
 
 func (a *AdminServer) handleStats(w http.ResponseWriter, r *http.Request) {
@@ -241,11 +258,6 @@ func (a *AdminServer) handlePorts(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *AdminServer) handlePortByID(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
-
 	portStr := strings.TrimPrefix(r.URL.Path, "/ports/")
 	port, err := strconv.Atoi(portStr)
 	if err != nil {
@@ -253,22 +265,42 @@ func (a *AdminServer) handlePortByID(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	a.deletePort(w, r, port)
+	switch r.Method {
+	case http.MethodGet:
+		a.getPort(w, port)
+	case http.MethodDelete:
+		a.deletePort(w, r, port)
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
 }
 
 func (a *AdminServer) listPorts(w http.ResponseWriter, _ *http.Request) {
-	a.router.mu.RLock()
-	defer a.router.mu.RUnlock()
-
-	ports := make([]PortResponse, 0, len(a.router.portMap))
-	for port, entry := range a.router.portMap {
-		ports = append(ports, PortResponse{
-			Port:       port,
-			CustomerID: entry.customerID,
-			Service:    entry.service,
-		})
+	infos := a.router.ListPorts()
+	ports := make([]PortResponse, 0, len(infos))
+	for _, info := range infos {
+		ports = append(ports, portInfoToResponse(info))
 	}
 	writeJSON(w, ports)
+}
+
+func (a *AdminServer) getPort(w http.ResponseWriter, port int) {
+	info, ok := a.router.GetPort(port)
+	if !ok {
+		http.Error(w, `{"error":"port not found"}`, http.StatusNotFound)
+		return
+	}
+	writeJSON(w, portInfoToResponse(info))
+}
+
+func portInfoToResponse(info PortInfo) PortResponse {
+	return PortResponse{
+		Port:       info.Port,
+		CustomerID: info.CustomerID,
+		Service:    info.Service,
+		ListenAddr: info.ListenAddr,
+		MaxStreams: info.MaxStreams,
+	}
 }
 
 func (a *AdminServer) createPort(w http.ResponseWriter, r *http.Request) {
@@ -283,16 +315,17 @@ func (a *AdminServer) createPort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if err := a.router.AddPortMapping(req.CustomerID, req.Port, req.Service, req.MaxStreams); err != nil {
-		writeError(w, err.Error(), http.StatusConflict)
-		return
-	}
-
-	// Start a TCP listener for the new port.
+	// Default listen address.
 	listenAddr := req.ListenAddr
 	if listenAddr == "" {
 		listenAddr = "0.0.0.0"
 	}
+
+	if err := a.router.AddPortMapping(req.CustomerID, req.Port, req.Service, listenAddr, req.MaxStreams); err != nil {
+		writeError(w, err.Error(), http.StatusConflict)
+		return
+	}
+
 	addr := fmt.Sprintf("%s:%d", listenAddr, req.Port)
 
 	listenerCtx := a.ctx
@@ -316,7 +349,10 @@ func (a *AdminServer) createPort(w http.ResponseWriter, r *http.Request) {
 		// Listener started successfully (blocking in accept loop).
 	}
 
-	a.logger.Info("admin: port mapping added",
+	// Runtime-only: remind the operator that this change is not persisted
+	// to the config file and will be lost on restart. See
+	// docs/api/control-plane.md#persistence.
+	a.logger.Warn("admin: port mapping added at runtime is not persisted; add to relay.yaml to survive restart",
 		"port", req.Port,
 		"customer_id", req.CustomerID,
 		"service", req.Service,
@@ -327,6 +363,8 @@ func (a *AdminServer) createPort(w http.ResponseWriter, r *http.Request) {
 		Port:       req.Port,
 		CustomerID: req.CustomerID,
 		Service:    req.Service,
+		ListenAddr: listenAddr,
+		MaxStreams: req.MaxStreams,
 	})
 }
 
@@ -342,14 +380,18 @@ func (a *AdminServer) deletePort(w http.ResponseWriter, _ *http.Request, port in
 		return
 	}
 
-	// Stop the TCP listener for this port. Log warning if it was not
-	// admin-started (e.g., started from config at boot).
+	// Stop the TCP listener for this port. Both config-started and
+	// admin-started listeners are registered in ClientListener.listeners,
+	// so StopPort handles both. If it errors here the listener simply
+	// was not known (unusual; log but do not fail the request).
 	if err := a.clientListener.StopPort(port); err != nil {
-		a.logger.Warn("admin: stop listener (may be config-started)",
+		a.logger.Warn("admin: stop listener failed",
 			"port", port, "error", err)
 	}
 
-	a.logger.Info("admin: port mapping removed",
+	// Runtime-only: if the port is also defined in relay.yaml, the
+	// config will re-add it on next restart. Warn the operator.
+	a.logger.Warn("admin: port mapping removed at runtime; also remove from relay.yaml to prevent reappearance on restart",
 		"port", port,
 		"customer_id", customerID)
 
@@ -384,17 +426,44 @@ func (a *AdminServer) handleAgents(w http.ResponseWriter, r *http.Request) {
 }
 
 func (a *AdminServer) handleAgentByID(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodDelete {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
-		return
-	}
-
 	customerID := strings.TrimPrefix(r.URL.Path, "/agents/")
 	if customerID == "" {
 		http.Error(w, `{"error":"customer_id required"}`, http.StatusBadRequest)
 		return
 	}
 
+	switch r.Method {
+	case http.MethodGet:
+		a.getAgent(w, r, customerID)
+	case http.MethodDelete:
+		a.deleteAgent(w, r, customerID)
+	default:
+		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+	}
+}
+
+func (a *AdminServer) getAgent(w http.ResponseWriter, r *http.Request, customerID string) {
+	agents, err := a.registry.ListConnectedAgents(r.Context())
+	if err != nil {
+		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		return
+	}
+	for _, ag := range agents {
+		if ag.CustomerID == customerID {
+			writeJSON(w, AgentResponse{
+				CustomerID:  ag.CustomerID,
+				RemoteAddr:  ag.RemoteAddr,
+				ConnectedAt: ag.ConnectedAt.Format(time.RFC3339),
+				LastSeen:    ag.LastSeen.Format(time.RFC3339),
+				StreamCount: ag.StreamCount,
+			})
+			return
+		}
+	}
+	http.Error(w, `{"error":"agent not found"}`, http.StatusNotFound)
+}
+
+func (a *AdminServer) deleteAgent(w http.ResponseWriter, r *http.Request, customerID string) {
 	if err := a.registry.Unregister(r.Context(), customerID); err != nil {
 		writeError(w, err.Error(), http.StatusNotFound)
 		return

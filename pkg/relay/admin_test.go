@@ -152,7 +152,7 @@ func TestAdmin_CreatePort_MissingFields(t *testing.T) {
 func TestAdmin_DeletePort(t *testing.T) {
 	addr, _, router, _ := testAdminServer(t)
 
-	router.AddPortMapping("customer-001", 18080, "http", 0) //nolint:errcheck // test setup
+	router.AddPortMapping("customer-001", 18080, "http", "", 0) //nolint:errcheck // test setup
 
 	req, err := http.NewRequest(http.MethodDelete, "http://"+addr+"/ports/18080", http.NoBody)
 	require.NoError(t, err)
@@ -327,7 +327,10 @@ func TestAdmin_Agents_MethodNotAllowed(t *testing.T) {
 func TestAdmin_AgentByID_MethodNotAllowed(t *testing.T) {
 	addr, _, _, _ := testAdminServer(t)
 
-	resp, err := http.Get("http://" + addr + "/agents/customer-001")
+	// GET and DELETE are now both valid. PUT is not.
+	req, err := http.NewRequest(http.MethodPut, "http://"+addr+"/agents/customer-001", http.NoBody)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
@@ -355,10 +358,97 @@ func TestAdmin_PortByID_InvalidPort(t *testing.T) {
 	assert.Equal(t, http.StatusBadRequest, resp.StatusCode)
 }
 
+func TestAdmin_ReadyCheck(t *testing.T) {
+	addr, _, _, _ := testAdminServer(t)
+
+	resp, err := http.Get("http://" + addr + "/readyz")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body map[string]string
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	assert.Equal(t, "ready", body["status"])
+}
+
+func TestAdmin_GetPort_Found(t *testing.T) {
+	addr, _, router, _ := testAdminServer(t)
+	require.NoError(t, router.AddPortMapping("customer-001", 19200, "http", "127.0.0.1", 50))
+
+	resp, err := http.Get("http://" + addr + "/ports/19200")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var got PortResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
+	assert.Equal(t, 19200, got.Port)
+	assert.Equal(t, "customer-001", got.CustomerID)
+	assert.Equal(t, "http", got.Service)
+	assert.Equal(t, "127.0.0.1", got.ListenAddr)
+	assert.Equal(t, 50, got.MaxStreams)
+}
+
+func TestAdmin_GetPort_NotFound(t *testing.T) {
+	addr, _, _, _ := testAdminServer(t)
+
+	resp, err := http.Get("http://" + addr + "/ports/65000")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
+func TestAdmin_ListPorts_IncludesListenAddrAndMaxStreams(t *testing.T) {
+	addr, _, router, _ := testAdminServer(t)
+	require.NoError(t, router.AddPortMapping("customer-001", 19201, "http", "127.0.0.1", 42))
+
+	resp, err := http.Get("http://" + addr + "/ports")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var ports []PortResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&ports))
+	require.Len(t, ports, 1)
+	assert.Equal(t, "127.0.0.1", ports[0].ListenAddr)
+	assert.Equal(t, 42, ports[0].MaxStreams)
+}
+
+func TestAdmin_GetAgent_Found(t *testing.T) {
+	addr, reg, _, _ := testAdminServer(t)
+
+	conn, agentMux := testConnectionPair("customer-001")
+	defer conn.Close()
+	defer agentMux.Close()
+	require.NoError(t, reg.Register(context.Background(), "customer-001", conn))
+
+	resp, err := http.Get("http://" + addr + "/agents/customer-001")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var got AgentResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
+	assert.Equal(t, "customer-001", got.CustomerID)
+}
+
+func TestAdmin_GetAgent_NotFound(t *testing.T) {
+	addr, _, _, _ := testAdminServer(t)
+
+	resp, err := http.Get("http://" + addr + "/agents/customer-unknown")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
+}
+
 func TestAdmin_PortByID_MethodNotAllowed(t *testing.T) {
 	addr, _, _, _ := testAdminServer(t)
 
-	resp, err := http.Get("http://" + addr + "/ports/12345")
+	// GET and DELETE are now both valid. PUT is not.
+	req, err := http.NewRequest(http.MethodPut, "http://"+addr+"/ports/12345", http.NoBody)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusMethodNotAllowed, resp.StatusCode)
