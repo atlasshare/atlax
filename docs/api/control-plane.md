@@ -51,6 +51,24 @@ Liveness probe. Returns agent and stream counts.
 
 ---
 
+### GET /readyz
+
+Readiness probe. Returns 200 when the registry is reachable and the admin server is serving requests. Suitable for ALB target group health checks. Distinct from `/healthz` which additionally reports agent/stream counts.
+
+**Response (ready):** `200 OK`
+
+```json
+{"status": "ready"}
+```
+
+**Response (not ready):** `503 Service Unavailable`
+
+```json
+{"status": "not ready"}
+```
+
+---
+
 ### GET /metrics
 
 Prometheus exposition format. Serves all `atlax_*` metrics via `promhttp.Handler()`.
@@ -88,15 +106,31 @@ List all active port-to-customer mappings.
   {
     "port": 18445,
     "customer_id": "customer-001",
-    "service": "smb"
+    "service": "smb",
+    "listen_addr": "127.0.0.1",
+    "max_streams": 0
   },
   {
     "port": 18080,
     "customer_id": "customer-001",
-    "service": "http"
+    "service": "http",
+    "listen_addr": "0.0.0.0",
+    "max_streams": 50
   }
 ]
 ```
+
+---
+
+### GET /ports/{port}
+
+Inspect a single port mapping.
+
+**Success:** `200 OK` with the same `PortResponse` object as `GET /ports`.
+
+**Errors:**
+- `400 Bad Request` -- invalid port number
+- `404 Not Found` -- no mapping for this port
 
 ---
 
@@ -168,6 +202,18 @@ List all connected agents.
   }
 ]
 ```
+
+---
+
+### GET /agents/{customerID}
+
+Inspect a single connected agent.
+
+**Success:** `200 OK` with the same `AgentResponse` object as `GET /agents`.
+
+**Errors:**
+- `400 Bad Request` -- empty customer ID
+- `404 Not Found` -- agent not connected
 
 ---
 
