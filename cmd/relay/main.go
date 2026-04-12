@@ -106,6 +106,34 @@ func run() error {
 		}
 	}
 
+	// Load sidecar and merge runtime port additions into the port index.
+	// Sidecar entries that conflict with relay.yaml are skipped (relay.yaml wins).
+	var sidecarStore *relay.SidecarStore
+	if cfg.Server.StorePath != "" {
+		sidecarStore = relay.NewSidecarStore(cfg.Server.StorePath)
+		sidecarData, loadErr := sidecarStore.Load()
+		if loadErr != nil {
+			logger.Warn("relay: sidecar load error, starting without persisted runtime ports",
+				"path", cfg.Server.StorePath, "error", loadErr)
+			sidecarStore = nil
+		} else {
+			for _, sp := range sidecarData.Ports {
+				if _, exists := portIndex.Entries[sp.Port]; exists {
+					continue // relay.yaml entry takes precedence
+				}
+				portIndex.Entries[sp.Port] = config.PortIndexEntry{
+					CustomerID: sp.CustomerID,
+					Service:    sp.Service,
+					ListenAddr: sp.ListenAddr,
+					MaxStreams:  sp.MaxStreams,
+				}
+			}
+			logger.Info("relay: sidecar loaded",
+				"path", cfg.Server.StorePath,
+				"ports", len(sidecarData.Ports))
+		}
+	}
+
 	server := relay.NewRelay(relay.ServerDeps{
 		AgentListener:  agentListener,
 		ClientListener: clientListener,
@@ -136,6 +164,7 @@ func run() error {
 		ClientListener: clientListener,
 		Logger:         logger,
 		Emitter:        emitter,
+		Store:          sidecarStore,
 	})
 	go func() {
 		if adminErr := admin.Start(ctx); adminErr != nil {

@@ -24,6 +24,7 @@ type AdminServer struct {
 	router         *PortRouter
 	clientListener *ClientListener
 	emitter        audit.Emitter
+	store          *SidecarStore
 	logger         *slog.Logger
 	server         *http.Server
 	socketPath     string
@@ -48,6 +49,9 @@ type AdminConfig struct {
 	// Emitter receives audit events for mutating admin API operations.
 	// If nil, mutations are logged but not audited.
 	Emitter audit.Emitter
+	// Store persists runtime port mutations to the sidecar JSON file.
+	// If nil, mutations are not persisted (relay.yaml remains authoritative).
+	Store *SidecarStore
 }
 
 // HealthResponse is the JSON body returned by /healthz.
@@ -100,6 +104,7 @@ func NewAdminServer(cfg *AdminConfig) *AdminServer {
 		router:         cfg.Router,
 		clientListener: cfg.ClientListener,
 		emitter:        cfg.Emitter,
+		store:          cfg.Store,
 		logger:         cfg.Logger,
 		socketPath:     cfg.SocketPath,
 		startTime:      time.Now(),
@@ -356,14 +361,20 @@ func (a *AdminServer) createPort(w http.ResponseWriter, r *http.Request) {
 		// Listener started successfully (blocking in accept loop).
 	}
 
-	// Runtime-only: remind the operator that this change is not persisted
-	// to the config file and will be lost on restart. See
-	// docs/api/control-plane.md#persistence.
-	a.logger.Warn("admin: port mapping added at runtime is not persisted; add to relay.yaml to survive restart",
-		"port", req.Port,
-		"customer_id", req.CustomerID,
-		"service", req.Service,
-		"listen_addr", addr)
+	// Persist the new mapping to the sidecar so it survives restart.
+	// If no store is configured, warn that the change will be lost.
+	if a.store != nil {
+		if saveErr := a.store.SaveCurrentState(a.router.ListPorts()); saveErr != nil {
+			a.logger.Warn("admin: failed to persist port mapping to sidecar",
+				"port", req.Port, "error", saveErr)
+		}
+	} else {
+		a.logger.Warn("admin: port mapping added at runtime is not persisted; add to relay.yaml to survive restart",
+			"port", req.Port,
+			"customer_id", req.CustomerID,
+			"service", req.Service,
+			"listen_addr", addr)
+	}
 
 	a.emitAudit(r.Context(), audit.ActionAdminPortAdded,
 		fmt.Sprintf("%d", req.Port), req.CustomerID,
@@ -400,8 +411,15 @@ func (a *AdminServer) deletePort(w http.ResponseWriter, r *http.Request, port in
 			"port", port, "error", err)
 	}
 
-	// Runtime-only: if the port is also defined in relay.yaml, the
-	// config will re-add it on next restart. Warn the operator.
+	// Persist the updated mapping set to the sidecar. If the deleted port
+	// is also defined in relay.yaml, warn that relay.yaml must be updated
+	// separately to prevent the mapping reappearing on next restart.
+	if a.store != nil {
+		if saveErr := a.store.SaveCurrentState(a.router.ListPorts()); saveErr != nil {
+			a.logger.Warn("admin: failed to persist port removal to sidecar",
+				"port", port, "error", saveErr)
+		}
+	}
 	a.logger.Warn("admin: port mapping removed at runtime; also remove from relay.yaml to prevent reappearance on restart",
 		"port", port,
 		"customer_id", customerID)

@@ -30,6 +30,13 @@ server:
   # Grace period for draining streams during shutdown (GOAWAY)
   shutdown_grace_period: 30s
 
+  # Path to the sidecar JSON file for persisting runtime port mutations.
+  # When set, ports added or removed via the admin API survive process
+  # restarts without requiring relay.yaml to be edited. relay.yaml
+  # entries always take precedence over sidecar entries on startup.
+  # Recommended path: /var/lib/atlax/relay-state.json
+  # store_path: /var/lib/atlax/relay-state.json
+
 tls:
   # Relay server certificate (signed by Relay Intermediate CA)
   # Use chain cert (relay.crt + relay-ca.crt), not bare cert.
