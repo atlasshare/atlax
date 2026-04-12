@@ -135,6 +135,7 @@ func run() error {
 		Router:         router,
 		ClientListener: clientListener,
 		Logger:         logger,
+		Emitter:        emitter,
 	})
 	go func() {
 		if adminErr := admin.Start(ctx); adminErr != nil {

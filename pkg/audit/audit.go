@@ -19,6 +19,13 @@ const (
 	ActionCertRotation      Action = "cert.rotation"
 	ActionGoAway            Action = "connection.goaway"
 	ActionHeartbeatTimeout  Action = "agent.heartbeat_timeout"
+
+	// Admin API actions — operator-initiated mutations via the control plane.
+	ActionAdminPortAdded         Action = "admin.port_added"
+	ActionAdminPortRemoved       Action = "admin.port_removed"
+	ActionAdminPortUpdated       Action = "admin.port_updated"
+	ActionAdminAgentDisconnected Action = "admin.agent_disconnected"
+	ActionAdminReload            Action = "admin.reload"
 )
 
 // Event is an immutable record of a single auditable occurrence.
