@@ -13,6 +13,8 @@ import (
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
+
+	"github.com/atlasshare/atlax/pkg/audit"
 )
 
 // AdminServer serves the admin API: health check, Prometheus metrics,
@@ -21,6 +23,7 @@ type AdminServer struct {
 	registry       AgentRegistry
 	router         *PortRouter
 	clientListener *ClientListener
+	emitter        audit.Emitter
 	logger         *slog.Logger
 	server         *http.Server
 	socketPath     string
@@ -42,6 +45,9 @@ type AdminConfig struct {
 	Router         *PortRouter
 	ClientListener *ClientListener
 	Logger         *slog.Logger
+	// Emitter receives audit events for mutating admin API operations.
+	// If nil, mutations are logged but not audited.
+	Emitter audit.Emitter
 }
 
 // HealthResponse is the JSON body returned by /healthz.
@@ -88,11 +94,12 @@ type PortCreateRequest struct {
 }
 
 // NewAdminServer creates an admin server with the full API.
-func NewAdminServer(cfg AdminConfig) *AdminServer {
+func NewAdminServer(cfg *AdminConfig) *AdminServer {
 	a := &AdminServer{
 		registry:       cfg.Registry,
 		router:         cfg.Router,
 		clientListener: cfg.ClientListener,
+		emitter:        cfg.Emitter,
 		logger:         cfg.Logger,
 		socketPath:     cfg.SocketPath,
 		startTime:      time.Now(),
@@ -358,6 +365,10 @@ func (a *AdminServer) createPort(w http.ResponseWriter, r *http.Request) {
 		"service", req.Service,
 		"listen_addr", addr)
 
+	a.emitAudit(r.Context(), audit.ActionAdminPortAdded,
+		fmt.Sprintf("%d", req.Port), req.CustomerID,
+		map[string]string{"service": req.Service, "listen_addr": addr})
+
 	w.WriteHeader(http.StatusCreated)
 	writeJSON(w, PortResponse{
 		Port:       req.Port,
@@ -368,7 +379,7 @@ func (a *AdminServer) createPort(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
-func (a *AdminServer) deletePort(w http.ResponseWriter, _ *http.Request, port int) {
+func (a *AdminServer) deletePort(w http.ResponseWriter, r *http.Request, port int) {
 	customerID, _, ok := a.router.LookupPort(port)
 	if !ok {
 		http.Error(w, `{"error":"port not found"}`, http.StatusNotFound)
@@ -394,6 +405,9 @@ func (a *AdminServer) deletePort(w http.ResponseWriter, _ *http.Request, port in
 	a.logger.Warn("admin: port mapping removed at runtime; also remove from relay.yaml to prevent reappearance on restart",
 		"port", port,
 		"customer_id", customerID)
+
+	a.emitAudit(r.Context(), audit.ActionAdminPortRemoved,
+		fmt.Sprintf("%d", port), customerID, nil)
 
 	w.WriteHeader(http.StatusNoContent)
 }
@@ -472,10 +486,31 @@ func (a *AdminServer) deleteAgent(w http.ResponseWriter, r *http.Request, custom
 	a.logger.Info("admin: agent disconnected",
 		"customer_id", customerID)
 
+	a.emitAudit(r.Context(), audit.ActionAdminAgentDisconnected,
+		customerID, customerID, nil)
+
 	w.WriteHeader(http.StatusNoContent)
 }
 
 // --- Helpers ---
+
+// emitAudit emits a best-effort audit event for a mutating admin operation.
+// target is the resource being acted on (port number or customer ID).
+// No-op if the emitter was not configured.
+func (a *AdminServer) emitAudit(ctx context.Context, action audit.Action, target, customerID string, metadata map[string]string) {
+	if a.emitter == nil {
+		return
+	}
+	//nolint:errcheck // best-effort audit
+	a.emitter.Emit(ctx, audit.Event{
+		Action:     action,
+		Actor:      "admin-api",
+		Target:     target,
+		Timestamp:  time.Now(),
+		CustomerID: customerID,
+		Metadata:   metadata,
+	})
+}
 
 func writeError(w http.ResponseWriter, msg string, code int) {
 	w.Header().Set("Content-Type", "application/json")

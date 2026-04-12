@@ -9,12 +9,71 @@ import (
 	"net"
 	"net/http"
 	"os"
+	"sync"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/atlasshare/atlax/pkg/audit"
 )
+
+// captureEmitter is a test-local audit.Emitter that records all emitted events.
+type captureEmitter struct {
+	mu     sync.Mutex
+	events []audit.Event
+}
+
+func (c *captureEmitter) Emit(_ context.Context, event audit.Event) error { //nolint:gocritic // hugeParam: signature must match audit.Emitter interface
+	c.mu.Lock()
+	c.events = append(c.events, event)
+	c.mu.Unlock()
+	return nil
+}
+
+func (c *captureEmitter) Close() error { return nil }
+
+func (c *captureEmitter) snapshot() []audit.Event {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	out := make([]audit.Event, len(c.events))
+	copy(out, c.events)
+	return out
+}
+
+// testAdminServerWithEmitter returns an admin server wired to a captureEmitter.
+func testAdminServerWithEmitter(t *testing.T) (addr string, reg *MemoryRegistry, router *PortRouter, cl *ClientListener, emitter *captureEmitter) {
+	t.Helper()
+	reg = NewMemoryRegistry(slog.Default())
+	router = NewPortRouter(reg, slog.Default())
+	cl = NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
+	emitter = &captureEmitter{}
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr = ln.Addr().String()
+	ln.Close()
+
+	ctx, cancelFn := context.WithCancel(context.Background())
+
+	admin := NewAdminServer(&AdminConfig{
+		Addr:           addr,
+		Registry:       reg,
+		Router:         router,
+		ClientListener: cl,
+		Logger:         slog.Default(),
+		Emitter:        emitter,
+	})
+
+	go func() {
+		admin.Start(ctx) //nolint:errcheck // stopped via ctx cancel
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	t.Cleanup(cancelFn)
+	return addr, reg, router, cl, emitter
+}
 
 func testAdminServer(t *testing.T) (addr string, reg *MemoryRegistry, router *PortRouter, cl *ClientListener) {
 	t.Helper()
@@ -29,7 +88,7 @@ func testAdminServer(t *testing.T) (addr string, reg *MemoryRegistry, router *Po
 
 	ctx, cancelFn := context.WithCancel(context.Background())
 
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		Addr:           addr,
 		Registry:       reg,
 		Router:         router,
@@ -466,7 +525,7 @@ func TestAdmin_StartUnixSocket(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		SocketPath:     socketPath,
 		Registry:       reg,
 		Router:         router,
@@ -510,7 +569,7 @@ func TestAdmin_StartBothTCPAndUnix(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		Addr:           tcpAddr,
 		SocketPath:     socketPath,
 		Registry:       reg,
@@ -560,7 +619,7 @@ func TestAdmin_SocketFailureFallsBackToTCP(t *testing.T) {
 	t.Cleanup(cancel)
 
 	// Unwritable socket path -- should warn and fall back to TCP.
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		Addr:           tcpAddr,
 		SocketPath:     "/nonexistent/dir/atlax.sock",
 		Registry:       reg,
@@ -599,7 +658,7 @@ func TestAdmin_SocketFailureOnlySocket(t *testing.T) {
 	t.Cleanup(cancel)
 
 	// Socket-only mode (no Addr) with unwritable path -- should fail.
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		SocketPath:     "/nonexistent/dir/atlax.sock",
 		Registry:       reg,
 		Router:         router,
@@ -626,7 +685,7 @@ func TestAdmin_EmptySocketPath(t *testing.T) {
 	t.Cleanup(cancel)
 
 	// Empty socket path -- TCP only, no socket attempted.
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		Addr:           tcpAddr,
 		SocketPath:     "",
 		Registry:       reg,
@@ -644,4 +703,126 @@ func TestAdmin_EmptySocketPath(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
+}
+
+// --- Audit emission tests ---
+
+func TestAdmin_AuditEmission_CreatePort(t *testing.T) {
+	addr, _, router, cl, emitter := testAdminServerWithEmitter(t)
+
+	// Bind a real listener so StartPort succeeds.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	body, _ := json.Marshal(map[string]any{
+		"port":        port,
+		"customer_id": "customer-audit-001",
+		"service":     "samba",
+	})
+	resp, err := http.Post("http://"+addr+"/ports", "application/json", bytes.NewReader(body))
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusCreated, resp.StatusCode)
+
+	// Clean up the started listener.
+	cl.StopPort(port)                                    //nolint:errcheck // best-effort cleanup
+	router.RemovePortMapping("customer-audit-001", port) //nolint:errcheck // best-effort cleanup
+
+	events := emitter.snapshot()
+	require.Len(t, events, 1)
+	assert.Equal(t, audit.ActionAdminPortAdded, events[0].Action)
+	assert.Equal(t, "admin-api", events[0].Actor)
+	assert.Equal(t, fmt.Sprintf("%d", port), events[0].Target)
+	assert.Equal(t, "customer-audit-001", events[0].CustomerID)
+	assert.Equal(t, "samba", events[0].Metadata["service"])
+}
+
+func TestAdmin_AuditEmission_DeletePort(t *testing.T) {
+	addr, _, router, cl, emitter := testAdminServerWithEmitter(t)
+
+	// Pre-register a port mapping and a listener.
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	port := ln.Addr().(*net.TCPAddr).Port
+	ln.Close()
+
+	require.NoError(t, router.AddPortMapping("customer-audit-002", port, "http", "127.0.0.1", 0))
+	ctx := context.Background()
+	go cl.StartPort(ctx, fmt.Sprintf("127.0.0.1:%d", port), port) //nolint:errcheck // test listener, error not relevant
+	time.Sleep(50 * time.Millisecond)
+
+	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("http://%s/ports/%d", addr, port), http.NoBody)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+
+	events := emitter.snapshot()
+	require.Len(t, events, 1)
+	assert.Equal(t, audit.ActionAdminPortRemoved, events[0].Action)
+	assert.Equal(t, "admin-api", events[0].Actor)
+	assert.Equal(t, fmt.Sprintf("%d", port), events[0].Target)
+	assert.Equal(t, "customer-audit-002", events[0].CustomerID)
+}
+
+func TestAdmin_AuditEmission_DeleteAgent(t *testing.T) {
+	addr, reg, _, _, emitter := testAdminServerWithEmitter(t)
+
+	conn, agentMux := testConnectionPair("customer-audit-003")
+	defer conn.Close()
+	defer agentMux.Close()
+	require.NoError(t, reg.Register(context.Background(), "customer-audit-003", conn))
+
+	req, _ := http.NewRequest(http.MethodDelete, "http://"+addr+"/agents/customer-audit-003", http.NoBody)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusNoContent, resp.StatusCode)
+
+	events := emitter.snapshot()
+	require.Len(t, events, 1)
+	assert.Equal(t, audit.ActionAdminAgentDisconnected, events[0].Action)
+	assert.Equal(t, "admin-api", events[0].Actor)
+	assert.Equal(t, "customer-audit-003", events[0].Target)
+	assert.Equal(t, "customer-audit-003", events[0].CustomerID)
+}
+
+func TestAdmin_AuditEmission_NilEmitter_NoPanic(t *testing.T) {
+	// AdminServer with no Emitter configured must not panic on mutations.
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+	cl := NewClientListener(ClientListenerConfig{Router: router, Logger: slog.Default()})
+
+	ln, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	adminAddr := ln.Addr().String()
+	ln.Close()
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	admin := NewAdminServer(&AdminConfig{
+		Addr:           adminAddr,
+		Registry:       reg,
+		Router:         router,
+		ClientListener: cl,
+		Logger:         slog.Default(),
+		// Emitter intentionally nil
+	})
+	go admin.Start(ctx) //nolint:errcheck // admin server error is logged internally; not relevant to this test
+	time.Sleep(100 * time.Millisecond)
+
+	// Register then delete an agent — should not panic.
+	conn, agentMux := testConnectionPair("customer-nil-emitter")
+	defer conn.Close()
+	defer agentMux.Close()
+	require.NoError(t, reg.Register(ctx, "customer-nil-emitter", conn))
+
+	req, _ := http.NewRequest(http.MethodDelete, "http://"+adminAddr+"/agents/customer-nil-emitter", http.NoBody)
+	resp, err := http.DefaultClient.Do(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusNoContent, resp.StatusCode)
 }

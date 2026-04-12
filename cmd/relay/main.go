@@ -128,13 +128,14 @@ func run() error {
 	})
 
 	// Start admin server (health check + metrics + CRUD API)
-	admin := relay.NewAdminServer(relay.AdminConfig{
+	admin := relay.NewAdminServer(&relay.AdminConfig{
 		Addr:           cfg.Server.AdminAddr,
 		SocketPath:     cfg.Server.AdminSocket,
 		Registry:       registry,
 		Router:         router,
 		ClientListener: clientListener,
 		Logger:         logger,
+		Emitter:        emitter,
 	})
 	go func() {
 		if adminErr := admin.Start(ctx); adminErr != nil {
