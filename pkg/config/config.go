@@ -30,6 +30,10 @@ type ServerConfig struct {
 	MaxStreamsPerAgent  int           `yaml:"max_streams_per_agent"`
 	IdleTimeout         time.Duration `yaml:"idle_timeout"`
 	ShutdownGracePeriod time.Duration `yaml:"shutdown_grace_period"`
+	// StorePath is the path to the sidecar JSON file that persists runtime
+	// port mutations across process restarts. If empty, runtime mutations
+	// are not persisted (existing behavior).
+	StorePath string `yaml:"store_path"`
 }
 
 // TLSPaths points to the PEM files needed for mTLS.
