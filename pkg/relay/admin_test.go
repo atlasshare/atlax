@@ -57,7 +57,7 @@ func testAdminServerWithEmitter(t *testing.T) (addr string, reg *MemoryRegistry,
 
 	ctx, cancelFn := context.WithCancel(context.Background())
 
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		Addr:           addr,
 		Registry:       reg,
 		Router:         router,
@@ -88,7 +88,7 @@ func testAdminServer(t *testing.T) (addr string, reg *MemoryRegistry, router *Po
 
 	ctx, cancelFn := context.WithCancel(context.Background())
 
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		Addr:           addr,
 		Registry:       reg,
 		Router:         router,
@@ -525,7 +525,7 @@ func TestAdmin_StartUnixSocket(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		SocketPath:     socketPath,
 		Registry:       reg,
 		Router:         router,
@@ -569,7 +569,7 @@ func TestAdmin_StartBothTCPAndUnix(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		Addr:           tcpAddr,
 		SocketPath:     socketPath,
 		Registry:       reg,
@@ -619,7 +619,7 @@ func TestAdmin_SocketFailureFallsBackToTCP(t *testing.T) {
 	t.Cleanup(cancel)
 
 	// Unwritable socket path -- should warn and fall back to TCP.
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		Addr:           tcpAddr,
 		SocketPath:     "/nonexistent/dir/atlax.sock",
 		Registry:       reg,
@@ -658,7 +658,7 @@ func TestAdmin_SocketFailureOnlySocket(t *testing.T) {
 	t.Cleanup(cancel)
 
 	// Socket-only mode (no Addr) with unwritable path -- should fail.
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		SocketPath:     "/nonexistent/dir/atlax.sock",
 		Registry:       reg,
 		Router:         router,
@@ -685,7 +685,7 @@ func TestAdmin_EmptySocketPath(t *testing.T) {
 	t.Cleanup(cancel)
 
 	// Empty socket path -- TCP only, no socket attempted.
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		Addr:           tcpAddr,
 		SocketPath:     "",
 		Registry:       reg,
@@ -803,7 +803,7 @@ func TestAdmin_AuditEmission_NilEmitter_NoPanic(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
-	admin := NewAdminServer(AdminConfig{
+	admin := NewAdminServer(&AdminConfig{
 		Addr:           adminAddr,
 		Registry:       reg,
 		Router:         router,

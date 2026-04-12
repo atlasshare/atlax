@@ -94,7 +94,7 @@ type PortCreateRequest struct {
 }
 
 // NewAdminServer creates an admin server with the full API.
-func NewAdminServer(cfg AdminConfig) *AdminServer {
+func NewAdminServer(cfg *AdminConfig) *AdminServer {
 	a := &AdminServer{
 		registry:       cfg.Registry,
 		router:         cfg.Router,
