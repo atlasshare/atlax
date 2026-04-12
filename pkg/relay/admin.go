@@ -161,9 +161,9 @@ func (a *AdminServer) Start(ctx context.Context) error {
 				"path", a.socketPath, "error", err)
 		} else {
 			if chmodErr := os.Chmod(a.socketPath, 0o600); chmodErr != nil {
-			a.logger.Warn("admin: failed to set socket permissions",
-				"path", a.socketPath, "error", chmodErr)
-		}
+				a.logger.Warn("admin: failed to set socket permissions",
+					"path", a.socketPath, "error", chmodErr)
+			}
 			a.logger.Info("relay: admin socket started", "path", a.socketPath)
 
 			if a.server.Addr == "" {

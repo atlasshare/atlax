@@ -17,7 +17,7 @@ type SidecarPort struct {
 	CustomerID string `json:"customer_id"`
 	Service    string `json:"service"`
 	ListenAddr string `json:"listen_addr"`
-	MaxStreams  int    `json:"max_streams"`
+	MaxStreams int    `json:"max_streams"`
 }
 
 // SidecarData is the JSON payload written to and read from the sidecar file.
@@ -117,7 +117,7 @@ func (s *SidecarStore) SaveCurrentState(ports []PortInfo) error {
 			CustomerID: p.CustomerID,
 			Service:    p.Service,
 			ListenAddr: p.ListenAddr,
-			MaxStreams:  p.MaxStreams,
+			MaxStreams: p.MaxStreams,
 		}
 	}
 	return s.Save(&SidecarData{Version: sidecarVersion, Ports: sps})

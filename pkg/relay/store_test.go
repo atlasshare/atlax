@@ -152,7 +152,7 @@ func TestSidecarStore_SaveCurrentState_RoundTrip(t *testing.T) {
 func TestSidecarStore_LoadVersionMismatch(t *testing.T) {
 	dir := t.TempDir()
 	path := filepath.Join(dir, "sidecar.json")
-	// Write a file with an unrecognised version.
+	// Write a file with an unrecognized version.
 	require.NoError(t, os.WriteFile(path, []byte(`{"version":"99","ports":[]}`), 0o600))
 
 	s := NewSidecarStore(path)

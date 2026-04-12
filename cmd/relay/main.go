@@ -163,7 +163,7 @@ func run() error {
 					CustomerID: sp.CustomerID,
 					Service:    sp.Service,
 					ListenAddr: listenAddr,
-					MaxStreams:  sp.MaxStreams,
+					MaxStreams: sp.MaxStreams,
 				}
 				merged++
 			}
