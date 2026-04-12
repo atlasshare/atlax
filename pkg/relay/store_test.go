@@ -62,8 +62,13 @@ func TestSidecarStore_AtomicWrite_NoTmpFile(t *testing.T) {
 
 	require.NoError(t, s.Save(data))
 
-	_, err := os.Stat(path + ".tmp")
-	assert.True(t, os.IsNotExist(err), "temp file must not exist after successful Save")
+	// The tmp file uses a random suffix now, so we check no .tmp files remain.
+	entries, readErr := os.ReadDir(dir)
+	require.NoError(t, readErr)
+	for _, e := range entries {
+		assert.False(t, filepath.Ext(e.Name()) == ".tmp",
+			"no .tmp files should remain after successful Save, found: %s", e.Name())
+	}
 }
 
 func TestSidecarStore_SaveCurrentState(t *testing.T) {
@@ -144,10 +149,21 @@ func TestSidecarStore_SaveCurrentState_RoundTrip(t *testing.T) {
 	assert.Empty(t, got.Ports)
 }
 
+func TestSidecarStore_LoadVersionMismatch(t *testing.T) {
+	dir := t.TempDir()
+	path := filepath.Join(dir, "sidecar.json")
+	// Write a file with an unrecognised version.
+	require.NoError(t, os.WriteFile(path, []byte(`{"version":"99","ports":[]}`), 0o600))
+
+	s := NewSidecarStore(path)
+	_, err := s.Load()
+	assert.ErrorContains(t, err, "unsupported version")
+}
+
 // TestSidecarData_JSONSchema verifies the JSON field names match the spec.
 func TestSidecarData_JSONSchema(t *testing.T) {
 	data := SidecarData{
-		Version: "1",
+		Version: sidecarVersion,
 		Ports: []SidecarPort{
 			{Port: 1234, CustomerID: "c1", Service: "s1", ListenAddr: "0.0.0.0", MaxStreams: 3},
 		},

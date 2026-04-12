@@ -160,7 +160,10 @@ func (a *AdminServer) Start(ctx context.Context) error {
 			a.logger.Warn("admin: unix socket failed, continuing with TCP only",
 				"path", a.socketPath, "error", err)
 		} else {
-			os.Chmod(a.socketPath, 0o660) //nolint:errcheck // best-effort permissions
+			if chmodErr := os.Chmod(a.socketPath, 0o600); chmodErr != nil {
+			a.logger.Warn("admin: failed to set socket permissions",
+				"path", a.socketPath, "error", chmodErr)
+		}
 			a.logger.Info("relay: admin socket started", "path", a.socketPath)
 
 			if a.server.Addr == "" {
@@ -322,8 +325,22 @@ func (a *AdminServer) createPort(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	if req.Port <= 0 || req.CustomerID == "" || req.Service == "" {
-		http.Error(w, `{"error":"port, customer_id, and service are required"}`, http.StatusBadRequest)
+	if req.Port <= 0 || req.Port > 65535 {
+		http.Error(w, `{"error":"port must be between 1 and 65535"}`, http.StatusBadRequest)
+		return
+	}
+	if req.CustomerID == "" || req.Service == "" {
+		http.Error(w, `{"error":"customer_id and service are required"}`, http.StatusBadRequest)
+		return
+	}
+	if req.ListenAddr != "" {
+		if net.ParseIP(req.ListenAddr) == nil {
+			http.Error(w, `{"error":"listen_addr must be a valid IP address"}`, http.StatusBadRequest)
+			return
+		}
+	}
+	if req.MaxStreams < 0 {
+		http.Error(w, `{"error":"max_streams must be non-negative"}`, http.StatusBadRequest)
 		return
 	}
 

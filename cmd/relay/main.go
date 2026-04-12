@@ -12,6 +12,8 @@ import (
 	"syscall"
 	"time"
 
+	"net"
+
 	"github.com/prometheus/client_golang/prometheus"
 
 	"github.com/atlasshare/atlax/pkg/audit"
@@ -117,20 +119,58 @@ func run() error {
 				"path", cfg.Server.StorePath, "error", loadErr)
 			sidecarStore = nil
 		} else {
+			seen := make(map[int]bool, len(sidecarData.Ports))
+			merged := 0
 			for _, sp := range sidecarData.Ports {
+				// Validate port range.
+				if sp.Port <= 0 || sp.Port > 65535 {
+					logger.Warn("relay: sidecar: skipping entry with invalid port", "port", sp.Port)
+					continue
+				}
+				// Validate required fields.
+				if sp.CustomerID == "" || sp.Service == "" {
+					logger.Warn("relay: sidecar: skipping entry with missing customer_id or service",
+						"port", sp.Port)
+					continue
+				}
+				// Validate listen address when set.
+				if sp.ListenAddr != "" && net.ParseIP(sp.ListenAddr) == nil {
+					logger.Warn("relay: sidecar: skipping entry with invalid listen_addr",
+						"port", sp.Port, "listen_addr", sp.ListenAddr)
+					continue
+				}
+				// Validate max_streams.
+				if sp.MaxStreams < 0 {
+					logger.Warn("relay: sidecar: skipping entry with negative max_streams",
+						"port", sp.Port)
+					continue
+				}
+				// Detect duplicates within the sidecar itself.
+				if seen[sp.Port] {
+					logger.Warn("relay: sidecar: duplicate port, skipping", "port", sp.Port)
+					continue
+				}
+				seen[sp.Port] = true
+				// relay.yaml entries always win.
 				if _, exists := portIndex.Entries[sp.Port]; exists {
-					continue // relay.yaml entry takes precedence
+					continue
+				}
+				listenAddr := sp.ListenAddr
+				if listenAddr == "" {
+					listenAddr = "0.0.0.0"
 				}
 				portIndex.Entries[sp.Port] = config.PortIndexEntry{
 					CustomerID: sp.CustomerID,
 					Service:    sp.Service,
-					ListenAddr: sp.ListenAddr,
+					ListenAddr: listenAddr,
 					MaxStreams:  sp.MaxStreams,
 				}
+				merged++
 			}
 			logger.Info("relay: sidecar loaded",
 				"path", cfg.Server.StorePath,
-				"ports", len(sidecarData.Ports))
+				"total", len(sidecarData.Ports),
+				"merged", merged)
 		}
 	}
 

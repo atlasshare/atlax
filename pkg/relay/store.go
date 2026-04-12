@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"sync"
 )
 
@@ -42,11 +43,14 @@ func NewSidecarStore(path string) *SidecarStore {
 // Load reads and parses the sidecar file. If the file does not exist,
 // an empty SidecarData is returned without error. Any other read or
 // parse error is returned to the caller.
+//
+// The mutex is held only for the file read; unmarshaling happens outside
+// the lock to keep the critical section short.
 func (s *SidecarStore) Load() (*SidecarData, error) {
 	s.mu.Lock()
-	defer s.mu.Unlock()
-
 	b, err := os.ReadFile(s.path)
+	s.mu.Unlock()
+
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
 			return &SidecarData{Version: sidecarVersion, Ports: []SidecarPort{}}, nil
@@ -58,14 +62,18 @@ func (s *SidecarStore) Load() (*SidecarData, error) {
 	if err := json.Unmarshal(b, &data); err != nil {
 		return nil, fmt.Errorf("sidecar: parse %s: %w", s.path, err)
 	}
+	if data.Version != sidecarVersion {
+		return nil, fmt.Errorf("sidecar: unsupported version %q (want %q)", data.Version, sidecarVersion)
+	}
 	if data.Ports == nil {
 		data.Ports = []SidecarPort{}
 	}
 	return &data, nil
 }
 
-// Save atomically writes data to the sidecar file. It writes to a
-// temporary file first, then renames it into place.
+// Save atomically writes data to the sidecar file. It creates a temp file
+// with a random suffix in the same directory (guaranteeing same-filesystem
+// rename), then renames it into place.
 func (s *SidecarStore) Save(data *SidecarData) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -75,12 +83,25 @@ func (s *SidecarStore) Save(data *SidecarData) error {
 		return fmt.Errorf("sidecar: marshal: %w", err)
 	}
 
-	tmp := s.path + ".tmp"
-	if err := os.WriteFile(tmp, b, 0o600); err != nil {
-		return fmt.Errorf("sidecar: write temp: %w", err)
+	dir := filepath.Dir(s.path)
+	tmp, err := os.CreateTemp(dir, ".sidecar-*.tmp")
+	if err != nil {
+		return fmt.Errorf("sidecar: create temp: %w", err)
 	}
-	if err := os.Rename(tmp, s.path); err != nil {
-		os.Remove(tmp) //nolint:errcheck // best-effort cleanup on rename failure
+	tmpName := tmp.Name()
+
+	_, writeErr := tmp.Write(b)
+	closeErr := tmp.Close()
+	if writeErr != nil || closeErr != nil {
+		os.Remove(tmpName) //nolint:errcheck // best-effort cleanup
+		if writeErr != nil {
+			return fmt.Errorf("sidecar: write temp: %w", writeErr)
+		}
+		return fmt.Errorf("sidecar: close temp: %w", closeErr)
+	}
+
+	if err := os.Rename(tmpName, s.path); err != nil {
+		os.Remove(tmpName) //nolint:errcheck // best-effort cleanup on rename failure
 		return fmt.Errorf("sidecar: rename: %w", err)
 	}
 	return nil
