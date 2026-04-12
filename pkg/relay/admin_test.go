@@ -25,7 +25,7 @@ type captureEmitter struct {
 	events []audit.Event
 }
 
-func (c *captureEmitter) Emit(_ context.Context, event audit.Event) error {
+func (c *captureEmitter) Emit(_ context.Context, event audit.Event) error { //nolint:gocritic // hugeParam: signature must match audit.Emitter interface
 	c.mu.Lock()
 	c.events = append(c.events, event)
 	c.mu.Unlock()
@@ -727,8 +727,8 @@ func TestAdmin_AuditEmission_CreatePort(t *testing.T) {
 	require.Equal(t, http.StatusCreated, resp.StatusCode)
 
 	// Clean up the started listener.
-	cl.StopPort(port)           //nolint:errcheck // best-effort cleanup
-	router.RemovePortMapping("customer-audit-001", port) //nolint:errcheck
+	cl.StopPort(port)                                    //nolint:errcheck // best-effort cleanup
+	router.RemovePortMapping("customer-audit-001", port) //nolint:errcheck // best-effort cleanup
 
 	events := emitter.snapshot()
 	require.Len(t, events, 1)
@@ -750,10 +750,10 @@ func TestAdmin_AuditEmission_DeletePort(t *testing.T) {
 
 	require.NoError(t, router.AddPortMapping("customer-audit-002", port, "http", "127.0.0.1", 0))
 	ctx := context.Background()
-	go cl.StartPort(ctx, fmt.Sprintf("127.0.0.1:%d", port), port) //nolint:errcheck
+	go cl.StartPort(ctx, fmt.Sprintf("127.0.0.1:%d", port), port) //nolint:errcheck // test listener, error not relevant
 	time.Sleep(50 * time.Millisecond)
 
-	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("http://%s/ports/%d", addr, port), nil)
+	req, _ := http.NewRequest(http.MethodDelete, fmt.Sprintf("http://%s/ports/%d", addr, port), http.NoBody)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -775,7 +775,7 @@ func TestAdmin_AuditEmission_DeleteAgent(t *testing.T) {
 	defer agentMux.Close()
 	require.NoError(t, reg.Register(context.Background(), "customer-audit-003", conn))
 
-	req, _ := http.NewRequest(http.MethodDelete, "http://"+addr+"/agents/customer-audit-003", nil)
+	req, _ := http.NewRequest(http.MethodDelete, "http://"+addr+"/agents/customer-audit-003", http.NoBody)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
@@ -811,7 +811,7 @@ func TestAdmin_AuditEmission_NilEmitter_NoPanic(t *testing.T) {
 		Logger:         slog.Default(),
 		// Emitter intentionally nil
 	})
-	go admin.Start(ctx) //nolint:errcheck
+	go admin.Start(ctx) //nolint:errcheck // admin server error is logged internally; not relevant to this test
 	time.Sleep(100 * time.Millisecond)
 
 	// Register then delete an agent — should not panic.
@@ -820,7 +820,7 @@ func TestAdmin_AuditEmission_NilEmitter_NoPanic(t *testing.T) {
 	defer agentMux.Close()
 	require.NoError(t, reg.Register(ctx, "customer-nil-emitter", conn))
 
-	req, _ := http.NewRequest(http.MethodDelete, "http://"+adminAddr+"/agents/customer-nil-emitter", nil)
+	req, _ := http.NewRequest(http.MethodDelete, "http://"+adminAddr+"/agents/customer-nil-emitter", http.NoBody)
 	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
