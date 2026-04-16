@@ -6,10 +6,17 @@ import (
 	"fmt"
 	"io"
 	"log/slog"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
 )
+
+// MaxServiceListCount caps the number of services a peer may advertise
+// in a single CmdServiceList frame. The relay protects itself against
+// a malicious or buggy agent attempting to allocate an unbounded slice
+// by flooding newline-delimited tokens.
+const MaxServiceListCount = 1024
 
 // MuxRole determines stream ID allocation parity.
 type MuxRole int
@@ -51,6 +58,12 @@ type MuxSession struct {
 
 	// Connection-level flow control
 	connSendWindow *FlowWindow
+
+	// serviceListCh delivers the most recent CmdServiceList payload
+	// from the peer. Buffered with capacity 1 so the handler never
+	// blocks; if a consumer has not drained the previous frame, the
+	// latest frame is dropped silently.
+	serviceListCh chan []string
 }
 
 // Compile-time interface check.
@@ -80,6 +93,7 @@ func NewMuxSession(
 		writeQueue:     NewWriteQueue(),
 		pendingOpen:    make(map[uint32]chan struct{}),
 		connSendWindow: NewFlowWindow(int32(config.ConnectionWindow)), //nolint:gosec // ConnectionWindow is bounded by config validation
+		serviceListCh:  make(chan []string, 1),
 	}
 
 	go m.readLoop()
@@ -344,6 +358,8 @@ func (m *MuxSession) handleFrame(f *Frame) {
 		m.handleWindowUpdate(f)
 	case CmdGoAway:
 		m.handleGoAway(f)
+	case CmdServiceList:
+		m.handleServiceList(f)
 	}
 }
 
@@ -504,6 +520,70 @@ func (m *MuxSession) handleWindowUpdate(f *Frame) {
 
 func (m *MuxSession) handleGoAway(_ *Frame) {
 	m.goingAway.Store(true)
+}
+
+// handleServiceList parses a CmdServiceList payload and publishes the
+// resulting (filtered) list on serviceListCh. The send is non-blocking:
+// if the channel already holds a prior frame that the caller has not
+// consumed, the new frame is dropped. Empty string segments (which can
+// arise from leading, trailing, or repeated newlines) are filtered out.
+// A cap of MaxServiceListCount protects against a malicious peer that
+// inflates the service count with many newlines.
+func (m *MuxSession) handleServiceList(f *Frame) {
+	var services []string
+	if len(f.Payload) > 0 {
+		raw := strings.Split(string(f.Payload), "\n")
+		if len(raw) > MaxServiceListCount {
+			m.logger.Warn("mux: service list truncated",
+				"received", len(raw),
+				"max", MaxServiceListCount)
+			raw = raw[:MaxServiceListCount]
+		}
+		services = make([]string, 0, len(raw))
+		for _, s := range raw {
+			if s == "" {
+				continue
+			}
+			services = append(services, s)
+		}
+	} else {
+		services = []string{}
+	}
+
+	select {
+	case m.serviceListCh <- services:
+	default:
+		// Consumer has not drained the previous frame. Drop silently
+		// rather than block the read loop. This mirrors our handling
+		// of other best-effort notification channels (pingCh, acceptCh).
+	}
+}
+
+// ServiceListCh returns a receive-only channel that carries the most
+// recent CmdServiceList payload from the peer. The channel has a
+// buffer of one; callers must receive before another frame arrives or
+// the newer payload will be dropped.
+func (m *MuxSession) ServiceListCh() <-chan []string {
+	return m.serviceListCh
+}
+
+// SendServiceList encodes services as a newline-separated UTF-8 payload
+// and enqueues a CmdServiceList frame at PriorityControl. The caller is
+// responsible for not including newline characters inside service names.
+func (m *MuxSession) SendServiceList(services []string) error {
+	payload := []byte(strings.Join(services, "\n"))
+	if len(payload) > MaxPayloadSize {
+		return fmt.Errorf("mux: service list: %w: payload size %d exceeds max %d",
+			ErrInvalidFrame, len(payload), MaxPayloadSize)
+	}
+
+	m.writeQueue.Enqueue(&Frame{
+		Version:  ProtocolVersion,
+		Command:  CmdServiceList,
+		StreamID: 0,
+		Payload:  payload,
+	}, PriorityControl)
+	return nil
 }
 
 // maybeRemoveStream removes a stream from the map if it is fully closed

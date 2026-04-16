@@ -81,11 +81,13 @@ type PortResponse struct {
 
 // AgentResponse represents a connected agent in API responses.
 type AgentResponse struct {
-	CustomerID  string `json:"customer_id"`
-	RemoteAddr  string `json:"remote_addr"`
-	ConnectedAt string `json:"connected_at"`
-	LastSeen    string `json:"last_seen"`
-	StreamCount int    `json:"stream_count"`
+	CustomerID   string   `json:"customer_id"`
+	RemoteAddr   string   `json:"remote_addr"`
+	ConnectedAt  string   `json:"connected_at"`
+	LastSeen     string   `json:"last_seen"`
+	StreamCount  int      `json:"stream_count"`
+	Services     []string `json:"services"`
+	CertNotAfter string   `json:"cert_not_after"`
 }
 
 // PortCreateRequest is the JSON body for POST /ports.
@@ -205,8 +207,8 @@ func (a *AdminServer) handleHealth(w http.ResponseWriter, r *http.Request) {
 	}
 
 	totalStreams := 0
-	for _, agent := range agents {
-		totalStreams += agent.StreamCount
+	for i := range agents {
+		totalStreams += agents[i].StreamCount
 	}
 
 	writeJSON(w, HealthResponse{
@@ -245,8 +247,8 @@ func (a *AdminServer) handleStats(w http.ResponseWriter, r *http.Request) {
 	}
 
 	totalStreams := 0
-	for _, agent := range agents {
-		totalStreams += agent.StreamCount
+	for i := range agents {
+		totalStreams += agents[i].StreamCount
 	}
 
 	uptime := time.Since(a.startTime)
@@ -462,16 +464,26 @@ func (a *AdminServer) handleAgents(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := make([]AgentResponse, len(agents))
-	for i, ag := range agents {
-		resp[i] = AgentResponse{
-			CustomerID:  ag.CustomerID,
-			RemoteAddr:  ag.RemoteAddr,
-			ConnectedAt: ag.ConnectedAt.Format(time.RFC3339),
-			LastSeen:    ag.LastSeen.Format(time.RFC3339),
-			StreamCount: ag.StreamCount,
-		}
+	for i := range agents {
+		resp[i] = agentInfoToResponse(&agents[i])
 	}
 	writeJSON(w, resp)
+}
+
+// agentInfoToResponse converts an internal AgentInfo into the JSON
+// response shape. Timestamps are formatted as RFC3339 for consistency
+// across the admin API. Accepts a pointer to avoid copying the
+// AgentInfo struct which carries slices and time values.
+func agentInfoToResponse(ag *AgentInfo) AgentResponse {
+	return AgentResponse{
+		CustomerID:   ag.CustomerID,
+		RemoteAddr:   ag.RemoteAddr,
+		ConnectedAt:  ag.ConnectedAt.Format(time.RFC3339),
+		LastSeen:     ag.LastSeen.Format(time.RFC3339),
+		StreamCount:  ag.StreamCount,
+		Services:     ag.Services,
+		CertNotAfter: ag.CertNotAfter.Format(time.RFC3339),
+	}
 }
 
 func (a *AdminServer) handleAgentByID(w http.ResponseWriter, r *http.Request) {
@@ -497,15 +509,9 @@ func (a *AdminServer) getAgent(w http.ResponseWriter, r *http.Request, customerI
 		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
 		return
 	}
-	for _, ag := range agents {
-		if ag.CustomerID == customerID {
-			writeJSON(w, AgentResponse{
-				CustomerID:  ag.CustomerID,
-				RemoteAddr:  ag.RemoteAddr,
-				ConnectedAt: ag.ConnectedAt.Format(time.RFC3339),
-				LastSeen:    ag.LastSeen.Format(time.RFC3339),
-				StreamCount: ag.StreamCount,
-			})
+	for i := range agents {
+		if agents[i].CustomerID == customerID {
+			writeJSON(w, agentInfoToResponse(&agents[i]))
 			return
 		}
 	}

@@ -129,6 +129,27 @@ func TestMemoryRegistry_ListConnectedAgents(t *testing.T) {
 	assert.Len(t, agents, 2)
 }
 
+func TestMemoryRegistry_ListConnectedAgents_IncludesServicesAndCert(t *testing.T) {
+	reg := testRegistry()
+	conn, agentMux := testConnectionPair("customer-001")
+	defer conn.Close()
+	defer agentMux.Close()
+
+	expiry := time.Now().Add(45 * 24 * time.Hour).UTC()
+	conn.SetServices([]string{"samba", "http"})
+	conn.SetCertNotAfter(expiry)
+
+	ctx := context.Background()
+	require.NoError(t, reg.Register(ctx, "customer-001", conn))
+
+	agents, err := reg.ListConnectedAgents(ctx)
+	require.NoError(t, err)
+	require.Len(t, agents, 1)
+
+	assert.Equal(t, []string{"samba", "http"}, agents[0].Services)
+	assert.Equal(t, expiry, agents[0].CertNotAfter)
+}
+
 func TestMemoryRegistry_ConcurrentAccess(t *testing.T) {
 	reg := testRegistry()
 	ctx := context.Background()

@@ -30,6 +30,13 @@ type ClientConfig struct {
 	MaxReconnectAttempts int
 	HeartbeatInterval    time.Duration
 	HeartbeatTimeout     time.Duration
+
+	// Services lists the service names this agent forwards (derived from
+	// the agent config's services map keys). It is sent to the relay
+	// immediately after the mux handshake as a CmdServiceList frame so
+	// that the relay admin API can expose per-agent service inventory.
+	// Empty slice skips the send (no empty-payload frame on the wire).
+	Services []string
 }
 
 // ClientStatus is a point-in-time snapshot of the agent client state.

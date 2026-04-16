@@ -56,6 +56,46 @@ func TestFrameCodecRoundTrip_AllCommands(t *testing.T) {
 	}
 }
 
+func TestCmdServiceList_EncodeDecodeRoundTrip(t *testing.T) {
+	codec := NewFrameCodec()
+
+	cases := []struct {
+		name    string
+		payload []byte
+	}{
+		{"Empty", []byte{}},
+		{"SingleService", []byte("samba")},
+		{"MultipleServices", []byte("samba\nhttp\napi")},
+		{"UTF8Service", []byte("samba\nhttp\nsvc-\xe2\x9c\x93")},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			original := &Frame{
+				Version:  ProtocolVersion,
+				Command:  CmdServiceList,
+				Flags:    0x00,
+				StreamID: 0,
+				Payload:  tc.payload,
+			}
+
+			var buf bytes.Buffer
+			require.NoError(t, codec.WriteFrame(&buf, original))
+
+			decoded, err := codec.ReadFrame(&buf)
+			require.NoError(t, err)
+			assert.Equal(t, original.Version, decoded.Version)
+			assert.Equal(t, CmdServiceList, decoded.Command)
+			assert.Equal(t, original.StreamID, decoded.StreamID)
+			if len(tc.payload) == 0 {
+				assert.Empty(t, decoded.Payload)
+			} else {
+				assert.Equal(t, tc.payload, decoded.Payload)
+			}
+		})
+	}
+}
+
 func TestFrameCodecRoundTrip_AllFlagCombinations(t *testing.T) {
 	tests := []struct {
 		name  string
@@ -540,6 +580,7 @@ func TestCommandString(t *testing.T) {
 		{CmdUDPUnbind, "UDP_UNBIND"},
 		{CmdUpdateManifest, "UPDATE_MANIFEST"},
 		{CmdUpdateBinary, "UPDATE_BINARY"},
+		{CmdServiceList, "SERVICE_LIST"},
 		{Command(0xFF), "UNKNOWN(0xff)"},
 	}
 
@@ -551,11 +592,11 @@ func TestCommandString(t *testing.T) {
 }
 
 func TestCommandIsValid(t *testing.T) {
-	for cmd := CmdStreamOpen; cmd <= CmdUpdateBinary; cmd++ {
+	for cmd := CmdStreamOpen; cmd <= CmdServiceList; cmd++ {
 		assert.True(t, cmd.IsValid(), "command 0x%02x should be valid", cmd)
 	}
 	assert.False(t, Command(0x00).IsValid())
-	assert.False(t, Command(0x0E).IsValid())
+	assert.False(t, Command(0x0F).IsValid())
 	assert.False(t, Command(0xFF).IsValid())
 }
 
