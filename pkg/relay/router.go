@@ -2,8 +2,13 @@ package relay
 
 import (
 	"context"
+	"errors"
 	"net"
 )
+
+// ErrPortNotFound is returned when an operation targets a port that is
+// not currently registered in the router's port map.
+var ErrPortNotFound = errors.New("relay: port not found")
 
 // TrafficRouter directs inbound client connections to the correct agent stream
 // based on customer identity and port allocation.

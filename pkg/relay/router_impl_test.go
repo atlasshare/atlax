@@ -276,3 +276,53 @@ func TestPortRouter_SetMetrics(t *testing.T) {
 	router.SetMetrics(m)
 	assert.NotNil(t, router.metrics)
 }
+
+// --- UpdatePortMapping tests (Step 3 B3) ---
+
+func TestPortRouter_UpdatePortMapping_Success(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+
+	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http", "127.0.0.1", 10))
+
+	err := router.UpdatePortMapping(8080, "https", "0.0.0.0", 25)
+	require.NoError(t, err)
+
+	info, ok := router.GetPort(8080)
+	require.True(t, ok)
+	assert.Equal(t, 8080, info.Port)
+	assert.Equal(t, "https", info.Service)
+	assert.Equal(t, "0.0.0.0", info.ListenAddr)
+	assert.Equal(t, 25, info.MaxStreams)
+}
+
+func TestPortRouter_UpdatePortMapping_NotFound(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+
+	err := router.UpdatePortMapping(9999, "http", "0.0.0.0", 10)
+	assert.ErrorIs(t, err, ErrPortNotFound)
+}
+
+// TestPortRouter_UpdatePortMapping_PreservesCustomerID is the critical
+// tenant-isolation invariant check: customerID must never change via
+// UpdatePortMapping, regardless of the mutable fields supplied.
+func TestPortRouter_UpdatePortMapping_PreservesCustomerID(t *testing.T) {
+	reg := NewMemoryRegistry(slog.Default())
+	router := NewPortRouter(reg, slog.Default())
+
+	require.NoError(t, router.AddPortMapping("customer-001", 8080, "http", "127.0.0.1", 10))
+
+	// Simulate many updates. customerID must remain "customer-001" throughout.
+	require.NoError(t, router.UpdatePortMapping(8080, "api", "0.0.0.0", 50))
+	info1, ok := router.GetPort(8080)
+	require.True(t, ok)
+	assert.Equal(t, "customer-001", info1.CustomerID,
+		"UpdatePortMapping must not mutate customerID")
+
+	require.NoError(t, router.UpdatePortMapping(8080, "samba", "10.0.0.1", 0))
+	info2, ok := router.GetPort(8080)
+	require.True(t, ok)
+	assert.Equal(t, "customer-001", info2.CustomerID,
+		"UpdatePortMapping must not mutate customerID after repeated calls")
+}
