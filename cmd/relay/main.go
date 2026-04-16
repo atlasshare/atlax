@@ -200,7 +200,9 @@ func run() error {
 	// producing noisy "skipped" warnings on every /status call.
 	certPaths := collectRelayCertPaths(cfg.TLS)
 
-	// Start admin server (health check + metrics + CRUD API)
+	// Start admin server (health check + metrics + CRUD API).
+	// ConfigPath + InitialConfig give the admin API the inputs it needs
+	// to serve GET /config and reconcile state on POST /reload / SIGHUP.
 	admin := relay.NewAdminServer(&relay.AdminConfig{
 		Addr:           cfg.Server.AdminAddr,
 		SocketPath:     cfg.Server.AdminSocket,
@@ -212,6 +214,8 @@ func run() error {
 		Store:          sidecarStore,
 		CertPaths:      certPaths,
 		ConfigVersion:  config.Version,
+		ConfigPath:     *configPath,
+		InitialConfig:  cfg,
 	})
 	go func() {
 		if adminErr := admin.Start(ctx); adminErr != nil {
@@ -244,16 +248,41 @@ func run() error {
 		"customers", len(cfg.Customers),
 		"ports", len(portIndex.Entries))
 
-	// Wait for shutdown signal
-	sigCh := make(chan os.Signal, 1)
-	signal.Notify(sigCh, syscall.SIGINT, syscall.SIGTERM)
+	// Wait for shutdown or reload signal. SIGHUP triggers a hot reload
+	// without stopping the relay; SIGINT/SIGTERM initiate graceful
+	// shutdown. A separate channel for SIGHUP keeps the select loop
+	// below simple and guarantees the signal intent is never ambiguous.
+	termCh := make(chan os.Signal, 1)
+	signal.Notify(termCh, syscall.SIGINT, syscall.SIGTERM)
+	hupCh := make(chan os.Signal, 1)
+	signal.Notify(hupCh, syscall.SIGHUP)
 
-	select {
-	case sig := <-sigCh:
-		logger.Info("received signal, shutting down", "signal", sig)
-	case err := <-serverDone:
-		if err != nil {
-			logger.Error("server stopped with error", "error", err)
+waitLoop:
+	for {
+		select {
+		case sig := <-termCh:
+			logger.Info("received signal, shutting down", "signal", sig)
+			break waitLoop
+		case <-hupCh:
+			logger.Info("received SIGHUP, reloading config", "path", *configPath)
+			summary, reloadErr := admin.Reload(ctx)
+			if reloadErr != nil {
+				logger.Error("sighup reload failed; current config retained",
+					"path", *configPath, "error", reloadErr)
+				continue
+			}
+			logger.Info("sighup reload complete",
+				"ports_added", summary.PortsAdded,
+				"ports_removed", summary.PortsRemoved,
+				"ports_updated", summary.PortsUpdated,
+				"ports_rejected", summary.PortsRejected,
+				"rate_limits_changed", summary.RateLimitsChanged,
+				"restart_required", summary.RestartRequired)
+		case err := <-serverDone:
+			if err != nil {
+				logger.Error("server stopped with error", "error", err)
+			}
+			break waitLoop
 		}
 	}
 
