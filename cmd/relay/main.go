@@ -195,6 +195,11 @@ func run() error {
 		Timestamp: time.Now(),
 	})
 
+	// Collect cert paths for /status cert expiry reporting. Filter out
+	// empty values so operators can leave optional paths unset without
+	// producing noisy "skipped" warnings on every /status call.
+	certPaths := collectRelayCertPaths(cfg.TLS)
+
 	// Start admin server (health check + metrics + CRUD API)
 	admin := relay.NewAdminServer(&relay.AdminConfig{
 		Addr:           cfg.Server.AdminAddr,
@@ -205,6 +210,8 @@ func run() error {
 		Logger:         logger,
 		Emitter:        emitter,
 		Store:          sidecarStore,
+		CertPaths:      certPaths,
+		ConfigVersion:  config.Version,
 	})
 	go func() {
 		if adminErr := admin.Start(ctx); adminErr != nil {
@@ -268,6 +275,26 @@ func run() error {
 
 	logger.Info("relay stopped")
 	return nil
+}
+
+// collectRelayCertPaths builds the CertPaths slice for the admin
+// /status endpoint from relay.yaml's TLS block. Empty entries are
+// filtered so /status does not emit a warning for every unconfigured
+// path on every call.
+func collectRelayCertPaths(paths config.TLSPaths) []relay.CertNamePath {
+	candidates := []relay.CertNamePath{
+		{Name: "relay", Path: paths.CertFile},
+		{Name: "relay_ca", Path: paths.CAFile},
+		{Name: "client_ca", Path: paths.ClientCAFile},
+	}
+	out := make([]relay.CertNamePath, 0, len(candidates))
+	for _, c := range candidates {
+		if c.Path == "" {
+			continue
+		}
+		out = append(out, c)
+	}
+	return out
 }
 
 func initLogger(cfg config.LogConfig) *slog.Logger {
