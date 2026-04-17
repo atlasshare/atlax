@@ -244,6 +244,86 @@ HTTP status codes are always set correctly (200, 201, 204, 400, 404, 405, 409, 5
 
 ---
 
+### GET /config
+
+Return the currently-loaded runtime configuration. This reflects the result of the most recent successful parse -- either the initial load at startup or the last successful `POST /reload`.
+
+**Response:**
+
+```json
+{
+  "server": {
+    "listen_addr": "0.0.0.0:8443",
+    "admin_addr": "127.0.0.1:9090",
+    "admin_socket": "/run/atlax/atlax.sock",
+    "store_path": "/var/lib/atlax/sidecar.json",
+    "shutdown_grace_period": "30s"
+  },
+  "tls": {
+    "cert_file": "/etc/atlax/relay.crt",
+    "key_file": "/etc/atlax/relay.key",
+    "client_ca_file": "/etc/atlax/customer-ca.crt"
+  },
+  "customers": [ ... ],
+  "ports": [ ... ],
+  "metrics": { ... }
+}
+```
+
+Full schema reference: see `configs/relay.example.yaml` or `docs/operations/production-setup.md`.
+
+**No redaction:** `RelayConfig` contains paths and operational data only -- no secret material (passwords, tokens, or private key content). Verified in the Step 5 step report.
+
+**Defensive copy:** Each response reflects a point-in-time snapshot. A concurrent reload does not partially leak through.
+
+**Errors:**
+- `405 Method Not Allowed` -- non-GET method
+
+---
+
+### POST /reload
+
+Trigger a hot-reload of `relay.yaml` without restarting the relay process. Also invokable via `SIGHUP` signal to the relay process (wired in `cmd/relay/main.go`).
+
+**Request body:** none
+
+**Behavior:**
+
+1. Re-reads the config file from the path passed at startup
+2. Validates via the normal `config.LoadRelayConfig` path
+3. Diffs against current runtime state:
+   - New ports (in new config, not in current): `AddPortMapping` + start listener
+   - Removed ports (in current, not in new): `RemovePortMapping` + stop listener
+   - Changed ports (same port, different mutable fields): `UpdatePortMapping`
+   - Changed rate limits: apply per-customer rate limiter updates
+4. **Security invariant:** rejects any port whose `customer_id` differs between old and new config. Rejected ports are left at their original binding. Rejection is per-port, not all-or-nothing -- other non-conflicting changes in the same reload succeed.
+5. Fields that require a process restart (TLS cert/key paths, server listen addr, agent listen addr) are logged as warnings and listed in the `restart_required` response field. These changes are NOT applied at runtime.
+
+**Success:** `200 OK`
+
+```json
+{
+  "ports_added": 1,
+  "ports_removed": 0,
+  "ports_updated": 2,
+  "ports_rejected": 0,
+  "rate_limits_changed": 1,
+  "restart_required": ["tls.cert_file"]
+}
+```
+
+**Errors:**
+- `405 Method Not Allowed` -- non-POST method
+- `422 Unprocessable Entity` -- config parse or validation error. The runtime state is unchanged.
+
+**Serialization:** Reloads are serialized (one at a time). A `SIGHUP` arriving during an in-flight reload is buffered (1-deep channel) and executed after the current reload completes.
+
+**Audit event:** Emits `admin.reload` with the summary as metadata.
+
+**SIGHUP:** `cmd/relay/main.go` wires `syscall.SIGHUP` to call the same `Reload()` method. `SIGINT`/`SIGTERM` remain shutdown signals.
+
+---
+
 ## Enterprise Extensions
 
 The enterprise edition extends the admin API with:

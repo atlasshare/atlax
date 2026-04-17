@@ -11,11 +11,13 @@ import (
 	"os"
 	"strconv"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 
 	"github.com/atlasshare/atlax/pkg/audit"
+	"github.com/atlasshare/atlax/pkg/config"
 )
 
 // AdminServer serves the admin API: health check, Prometheus metrics,
@@ -38,6 +40,16 @@ type AdminServer struct {
 	// Build-injected or operator-supplied version string surfaced on
 	// /status as config_version.
 	configVersion string
+
+	// Reload state (Step 5, B7+B8). configPath is the relay.yaml the
+	// Reload method re-reads from disk. currentCfg is the last
+	// successfully-applied snapshot; it is protected by cfgMu.
+	// reloadMu serializes reloads so SIGHUP and POST /reload never
+	// interleave and operators never observe a partially-applied state.
+	configPath string
+	cfgMu      sync.RWMutex
+	currentCfg *config.RelayConfig
+	reloadMu   sync.Mutex
 }
 
 // AdminConfig holds settings for the admin server.
@@ -71,6 +83,18 @@ type AdminConfig struct {
 	// config_version. Typically populated from build-injected
 	// pkg/config.Version, or an operator-supplied override.
 	ConfigVersion string
+
+	// ConfigPath is the on-disk relay.yaml path. Reload re-reads this
+	// file and reconciles runtime state. If empty, POST /reload and
+	// SIGHUP-driven reloads return 422; GET /config still works if
+	// InitialConfig is provided.
+	ConfigPath string
+
+	// InitialConfig is the snapshot that was loaded at boot and applied
+	// to the router/listener. GET /config reports this snapshot until
+	// the first successful Reload(). If nil and ConfigPath is set, the
+	// first Reload() seeds currentCfg from disk.
+	InitialConfig *config.RelayConfig
 }
 
 // HealthResponse is the JSON body returned by /healthz.
@@ -148,6 +172,8 @@ func NewAdminServer(cfg *AdminConfig) *AdminServer {
 		startTime:      time.Now(),
 		certPaths:      certPaths,
 		configVersion:  cfg.ConfigVersion,
+		configPath:     cfg.ConfigPath,
+		currentCfg:     cfg.InitialConfig,
 	}
 
 	mux := http.NewServeMux()
@@ -164,6 +190,8 @@ func NewAdminServer(cfg *AdminConfig) *AdminServer {
 	mux.HandleFunc("/agents/", a.handleAgentByID)
 	mux.HandleFunc("/stats", a.handleStats)
 	mux.HandleFunc("/status", a.handleStatus)
+	mux.HandleFunc("/config", a.handleConfig)
+	mux.HandleFunc("/reload", a.handleReload)
 
 	a.server = &http.Server{
 		Addr:              cfg.Addr,
