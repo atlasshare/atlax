@@ -50,10 +50,11 @@ func (a *AdminServer) handleConfig(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	// Defensive deep copy: marshal a fresh value derived from the snapshot
-	// taken under the read lock. We intentionally do NOT hand json.Encoder
-	// the shared pointer so that a subsequent Reload() cannot observe or
-	// race with the encoding goroutine.
+	// Shallow struct copy. Slice fields (e.g. Customers) share the backing
+	// array with currentCfg. This is safe because loader.LoadRelayConfig
+	// always returns a new allocation and Reload never mutates the loaded
+	// config after assignment. Any change to that contract requires a true
+	// deep copy here.
 	snapshot := *cfg
 	writeJSON(w, snapshot)
 }
@@ -103,6 +104,17 @@ func (a *AdminServer) Reload(ctx context.Context) (ReloadSummary, error) {
 		a.logger.Error("admin: reload failed; current config retained",
 			"path", a.configPath, "error", err)
 		return ReloadSummary{}, err
+	}
+
+	// Validate port uniqueness across customers. The boot path does this
+	// via BuildPortIndex in main.go; the reload path must also reject
+	// configs with duplicate ports to avoid misleading PortsRejected
+	// summaries. Without this, a duplicate port silently triggers
+	// rejectCustomerChange instead of a clean validation error.
+	if _, err := config.BuildPortIndex(newCfg.Customers); err != nil {
+		a.logger.Error("admin: reload failed; config has port conflict",
+			"path", a.configPath, "error", err)
+		return ReloadSummary{}, fmt.Errorf("reload: invalid config: %w", err)
 	}
 
 	a.cfgMu.Lock()

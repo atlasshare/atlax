@@ -342,6 +342,39 @@ func TestAdmin_Reload_ValidateError_LeavesStateUnchanged(t *testing.T) {
 	assert.Equal(t, "http", info.Service)
 }
 
+func TestAdmin_Reload_DuplicatePort_Returns422(t *testing.T) {
+	h := setupReloadHarness(t)
+
+	// Config where two customers claim the same port.
+	dupYAML := `
+server:
+  listen_addr: "127.0.0.1:18443"
+tls:
+  cert_file: /etc/atlax/relay.crt
+  key_file: /etc/atlax/relay.key
+  client_ca_file: /etc/atlax/customer-ca.crt
+customers:
+  - id: customer-001
+    ports:
+      - port: 18080
+        service: http
+  - id: customer-002
+    ports:
+      - port: 18080
+        service: smb
+`
+	h.rewriteConfig(t, dupYAML)
+
+	_, err := h.admin.Reload(context.Background())
+	require.Error(t, err)
+	assert.Contains(t, err.Error(), "port 18080")
+
+	// Router state unchanged -- port still belongs to customer-001.
+	info, ok := h.router.GetPort(18080)
+	require.True(t, ok)
+	assert.Equal(t, "customer-001", info.CustomerID)
+}
+
 // TestAdmin_Reload_CustomerIDImmutable is the core security test.
 // An attacker who can flip a port's customer_id in relay.yaml and
 // trigger a reload must NOT be able to reroute the port to a different
