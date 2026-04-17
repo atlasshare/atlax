@@ -401,3 +401,78 @@ func TestClient_ConcurrentConnectClose(t *testing.T) {
 
 	wg.Wait()
 }
+
+// --- CmdServiceList emission tests ---
+
+func TestClient_Connect_SendsServiceList(t *testing.T) {
+	dialer := newPipeDialer()
+
+	cfg := testClientConfig()
+	cfg.Services = []string{"samba", "http"}
+
+	c := NewClient(cfg, testLogger(), WithDialer(dialer))
+	defer c.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	relayReceived := make(chan []string, 1)
+	go func() {
+		remote := dialer.accept(t)
+		relay := relaySimulator(t, remote)
+		defer relay.Close()
+
+		select {
+		case services := <-relay.ServiceListCh():
+			relayReceived <- services
+		case <-ctx.Done():
+		}
+		<-ctx.Done()
+	}()
+
+	require.NoError(t, c.Connect(ctx))
+
+	select {
+	case services := <-relayReceived:
+		assert.Equal(t, []string{"samba", "http"}, services)
+	case <-time.After(2 * time.Second):
+		t.Fatal("relay did not receive CmdServiceList after Connect")
+	}
+}
+
+func TestClient_Connect_SkipsEmptyServiceList(t *testing.T) {
+	dialer := newPipeDialer()
+
+	cfg := testClientConfig()
+	cfg.Services = nil // explicit: agent has no services to advertise
+
+	c := NewClient(cfg, testLogger(), WithDialer(dialer))
+	defer c.Close()
+
+	ctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+
+	sawFrame := make(chan struct{}, 1)
+	go func() {
+		remote := dialer.accept(t)
+		relay := relaySimulator(t, remote)
+		defer relay.Close()
+
+		select {
+		case <-relay.ServiceListCh():
+			sawFrame <- struct{}{}
+		case <-ctx.Done():
+		}
+		<-ctx.Done()
+	}()
+
+	require.NoError(t, c.Connect(ctx))
+
+	// Wait a conservative amount of time; no CmdServiceList should arrive.
+	select {
+	case <-sawFrame:
+		t.Fatal("Connect emitted CmdServiceList despite empty Services slice")
+	case <-time.After(200 * time.Millisecond):
+		// expected
+	}
+}

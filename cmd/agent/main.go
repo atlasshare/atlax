@@ -70,6 +70,17 @@ func run() error {
 		return fmt.Errorf("create TLS config: %w", err)
 	}
 
+	// Derive the advertised service-name list from the agent's configured
+	// service map. Empty names are skipped to avoid emitting blank
+	// entries in the CmdServiceList frame.
+	serviceNames := make([]string, 0, len(cfg.Services))
+	for _, s := range cfg.Services {
+		if s.Name == "" {
+			continue
+		}
+		serviceNames = append(serviceNames, s.Name)
+	}
+
 	// Create agent client
 	clientCfg := agent.ClientConfig{
 		RelayAddr:            cfg.Relay.Addr,
@@ -78,6 +89,7 @@ func run() error {
 		MaxReconnectAttempts: 10,
 		HeartbeatInterval:    cfg.Relay.KeepaliveInterval,
 		HeartbeatTimeout:     cfg.Relay.KeepaliveTimeout,
+		Services:             serviceNames,
 	}
 
 	client := agent.NewClient(clientCfg, logger)

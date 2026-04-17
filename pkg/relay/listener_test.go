@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/atlasshare/atlax/pkg/audit"
+	"github.com/atlasshare/atlax/pkg/protocol"
 )
 
 func testCertsDir() string {
@@ -143,6 +144,150 @@ func TestAgentListener_AcceptsAndRegisters(t *testing.T) {
 	// Since we used "127.0.0.1:0", we can't connect without knowing
 	// the actual port. Let me use a fixed port for this test.
 	cancel()
+}
+
+func TestAgentListener_ServiceListReceived(t *testing.T) {
+	skipIfNoCerts(t)
+
+	emitter := audit.NewSlogEmitter(slog.Default(), 256)
+	reg := NewMemoryRegistry(slog.Default())
+
+	tcpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := tcpLn.Addr().String()
+	tcpLn.Close()
+
+	listener := NewAgentListener(AgentListenerConfig{
+		Addr:      addr,
+		TLSConfig: relayTLSConfig(t),
+		Registry:  reg,
+		Emitter:   emitter,
+		Logger:    slog.Default(),
+		MaxAgents: 10,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	listenerDone := make(chan struct{})
+	go func() {
+		defer close(listenerDone)
+		listener.Start(ctx) //nolint:errcheck // stopped via ctx cancel
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	// Agent dials and immediately emits CmdServiceList.
+	agentConn, err := tls.Dial("tcp", addr, agentTLSConfig(t))
+	require.NoError(t, err)
+	defer agentConn.Close()
+
+	agentMux := protocol.NewMuxSession(agentConn, protocol.RoleAgent, protocol.MuxConfig{
+		MaxConcurrentStreams: 16,
+		InitialStreamWindow:  262144,
+		ConnectionWindow:     1048576,
+		PingInterval:         30 * time.Second,
+		PingTimeout:          5 * time.Second,
+		IdleTimeout:          60 * time.Second,
+	})
+	defer agentMux.Close()
+
+	require.NoError(t, agentMux.SendServiceList([]string{"samba", "http", "api"}))
+
+	// Wait for registration + service ingestion (relay waits up to 50ms).
+	time.Sleep(250 * time.Millisecond)
+
+	agents, listErr := reg.ListConnectedAgents(context.Background())
+	require.NoError(t, listErr)
+	require.GreaterOrEqual(t, len(agents), 1)
+
+	var found *AgentInfo
+	for i := range agents {
+		if agents[i].CustomerID == "customer-dev-001" {
+			found = &agents[i]
+			break
+		}
+	}
+	require.NotNil(t, found, "customer-dev-001 not registered")
+	assert.Equal(t, []string{"samba", "http", "api"}, found.Services)
+	assert.False(t, found.CertNotAfter.IsZero(), "cert NotAfter should be populated from peer cert")
+	assert.True(t, found.CertNotAfter.After(time.Now()), "cert NotAfter should be in the future")
+
+	cancel()
+	<-listenerDone
+}
+
+func TestAgentListener_NoServiceList_DoesNotBlock(t *testing.T) {
+	skipIfNoCerts(t)
+
+	emitter := audit.NewSlogEmitter(slog.Default(), 256)
+	reg := NewMemoryRegistry(slog.Default())
+
+	tcpLn, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	addr := tcpLn.Addr().String()
+	tcpLn.Close()
+
+	listener := NewAgentListener(AgentListenerConfig{
+		Addr:      addr,
+		TLSConfig: relayTLSConfig(t),
+		Registry:  reg,
+		Emitter:   emitter,
+		Logger:    slog.Default(),
+		MaxAgents: 10,
+	})
+
+	ctx, cancel := context.WithCancel(context.Background())
+	listenerDone := make(chan struct{})
+	go func() {
+		defer close(listenerDone)
+		listener.Start(ctx) //nolint:errcheck // stopped via ctx cancel
+	}()
+	time.Sleep(100 * time.Millisecond)
+
+	// Dial and do NOT send CmdServiceList. Bare TLS conn only.
+	start := time.Now()
+	agentConn, err := tls.Dial("tcp", addr, agentTLSConfig(t))
+	require.NoError(t, err)
+	defer agentConn.Close()
+
+	// Poll for registration. We want the time from dial to registration
+	// to be roughly dominated by the 50ms serviceListWaitTimeout, not
+	// an unbounded block.
+	deadline := time.Now().Add(2 * time.Second)
+	var registered bool
+	for time.Now().Before(deadline) {
+		agents, listErr := reg.ListConnectedAgents(context.Background())
+		require.NoError(t, listErr)
+		for _, ag := range agents {
+			if ag.CustomerID == "customer-dev-001" {
+				registered = true
+				break
+			}
+		}
+		if registered {
+			break
+		}
+		time.Sleep(5 * time.Millisecond)
+	}
+	elapsed := time.Since(start)
+
+	require.True(t, registered, "agent never registered")
+	assert.Less(t, elapsed, 500*time.Millisecond,
+		"registration took %v; 50ms service-list wait must not explode into unbounded block", elapsed)
+
+	// Confirm Services is empty (nothing advertised).
+	agents, listErr := reg.ListConnectedAgents(context.Background())
+	require.NoError(t, listErr)
+	var found *AgentInfo
+	for i := range agents {
+		if agents[i].CustomerID == "customer-dev-001" {
+			found = &agents[i]
+			break
+		}
+	}
+	require.NotNil(t, found)
+	assert.Empty(t, found.Services, "no CmdServiceList was sent; Services must be empty")
+
+	cancel()
+	<-listenerDone
 }
 
 func TestAgentListener_IntegrationWithMTLS(t *testing.T) {

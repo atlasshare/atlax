@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/binary"
 	"io"
+	"log/slog"
 	"net"
 	"sync"
 	"testing"
@@ -1132,4 +1133,184 @@ func TestMuxSession_StreamIDHighChurn(t *testing.T) {
 
 	assert.Less(t, nextID, uint32(40),
 		"with recycling, nextStreamID should not reach 40 after 20 cycles")
+}
+
+// --- SERVICE_LIST (0x0E) tests ---
+
+func TestMuxSession_ServiceListFrame(t *testing.T) {
+	relay, agent := newMuxPair(t)
+
+	// Agent emits the service list.
+	err := agent.SendServiceList([]string{"samba", "http", "api"})
+	require.NoError(t, err)
+
+	select {
+	case services := <-relay.ServiceListCh():
+		assert.Equal(t, []string{"samba", "http", "api"}, services)
+	case <-time.After(1 * time.Second):
+		t.Fatal("relay did not receive service list")
+	}
+}
+
+func TestMuxSession_ServiceListFrame_FiltersEmpty(t *testing.T) {
+	relay, _ := newMuxPair(t)
+
+	// Inject a raw frame containing empty segments to simulate
+	// a malformed agent. Empty strings must be filtered out.
+	relay.handleServiceList(&Frame{
+		Version:  ProtocolVersion,
+		Command:  CmdServiceList,
+		StreamID: 0,
+		Payload:  []byte("samba\n\nhttp\n"),
+	})
+
+	select {
+	case services := <-relay.ServiceListCh():
+		assert.Equal(t, []string{"samba", "http"}, services)
+	case <-time.After(1 * time.Second):
+		t.Fatal("service list not delivered")
+	}
+}
+
+func TestMuxSession_ServiceListFrame_EmptyPayload(t *testing.T) {
+	relay, _ := newMuxPair(t)
+
+	relay.handleServiceList(&Frame{
+		Version:  ProtocolVersion,
+		Command:  CmdServiceList,
+		StreamID: 0,
+		Payload:  nil,
+	})
+
+	select {
+	case services := <-relay.ServiceListCh():
+		assert.Empty(t, services, "empty payload should deliver empty slice")
+	case <-time.After(1 * time.Second):
+		t.Fatal("service list not delivered for empty payload")
+	}
+}
+
+func TestMuxSession_ServiceListFrame_NonBlocking(t *testing.T) {
+	relay, _ := newMuxPair(t)
+
+	// First send fills the buffer-of-1.
+	relay.handleServiceList(&Frame{Command: CmdServiceList, Payload: []byte("first")})
+
+	// Second send must drop silently rather than block.
+	done := make(chan struct{})
+	go func() {
+		relay.handleServiceList(&Frame{Command: CmdServiceList, Payload: []byte("second")})
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(1 * time.Second):
+		t.Fatal("handleServiceList blocked when channel was full")
+	}
+
+	// Receiver should see only the first.
+	services := <-relay.ServiceListCh()
+	assert.Equal(t, []string{"first"}, services)
+}
+
+func TestMuxSession_SendServiceList_EnqueuesControlPriority(t *testing.T) {
+	// End-to-end: agent sends SERVICE_LIST, relay receives on ServiceListCh.
+	// This exercises SendServiceList -> writeQueue -> wire -> codec -> handleFrame.
+	relay, agent := newMuxPair(t)
+
+	// Pre-fill the agent's data queue with frames destined for the relay.
+	// The SERVICE_LIST (control priority) must still be delivered promptly.
+	for i := 0; i < 3; i++ {
+		agent.writeQueue.Enqueue(&Frame{
+			Version:  ProtocolVersion,
+			Command:  CmdPing, // benign; relay will respond with PONG
+			StreamID: 0,
+			Payload:  []byte{0, 0, 0, 0, 0, 0, 0, byte(i)},
+		}, PriorityControl)
+	}
+
+	require.NoError(t, agent.SendServiceList([]string{"samba", "http"}))
+
+	select {
+	case services := <-relay.ServiceListCh():
+		assert.Equal(t, []string{"samba", "http"}, services)
+	case <-time.After(2 * time.Second):
+		t.Fatal("SendServiceList did not deliver to peer")
+	}
+}
+
+func TestMuxSession_SendServiceList_FramePayloadFormat(t *testing.T) {
+	// Unit test: confirm SendServiceList emits a CmdServiceList frame
+	// with newline-joined payload and StreamID=0. Uses a muxer with no
+	// transport attached by consuming frames before the writeLoop can.
+	c1, _ := net.Pipe()
+	m := &MuxSession{
+		transport:      c1,
+		codec:          NewFrameCodec(),
+		config:         defaultMuxConfig(),
+		role:           RoleAgent,
+		logger:         slog.Default(),
+		streams:        make(map[uint32]*StreamSession),
+		acceptCh:       make(chan *StreamSession, 1),
+		closeCh:        make(chan struct{}),
+		writeQueue:     NewWriteQueue(),
+		pendingOpen:    make(map[uint32]chan struct{}),
+		connSendWindow: NewFlowWindow(1048576),
+		serviceListCh:  make(chan []string, 1),
+	}
+	// Note: no readLoop/writeLoop started. Queue stays put.
+	defer c1.Close()
+
+	require.NoError(t, m.SendServiceList([]string{"samba", "http"}))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
+	defer cancel()
+
+	f, err := m.writeQueue.Dequeue(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, CmdServiceList, f.Command)
+	assert.Equal(t, uint32(0), f.StreamID)
+	assert.Equal(t, "samba\nhttp", string(f.Payload))
+}
+
+func TestMuxSession_SendServiceList_Empty(t *testing.T) {
+	// Empty slice produces an empty-payload frame. The caller in the agent
+	// is responsible for skipping the send when it has no services.
+	c1, _ := net.Pipe()
+	m := &MuxSession{
+		transport:      c1,
+		codec:          NewFrameCodec(),
+		config:         defaultMuxConfig(),
+		role:           RoleAgent,
+		logger:         slog.Default(),
+		streams:        make(map[uint32]*StreamSession),
+		acceptCh:       make(chan *StreamSession, 1),
+		closeCh:        make(chan struct{}),
+		writeQueue:     NewWriteQueue(),
+		pendingOpen:    make(map[uint32]chan struct{}),
+		connSendWindow: NewFlowWindow(1048576),
+		serviceListCh:  make(chan []string, 1),
+	}
+	defer c1.Close()
+
+	require.NoError(t, m.SendServiceList(nil))
+
+	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
+	defer cancel()
+
+	f, err := m.writeQueue.Dequeue(ctx)
+	require.NoError(t, err)
+	assert.Equal(t, CmdServiceList, f.Command)
+	assert.Empty(t, f.Payload)
+}
+
+func TestMuxSession_ServiceListFrame_DroppedOnClose(t *testing.T) {
+	relay, _ := newMuxPair(t)
+	relay.Close()
+
+	// Sending on the close path should not panic; channel send remains
+	// non-blocking. The purpose of this test is to ensure SendServiceList
+	// errs gracefully (no runtime panic).
+	_ = relay.SendServiceList([]string{"svc"})
 }

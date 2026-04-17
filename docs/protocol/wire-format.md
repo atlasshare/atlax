@@ -59,8 +59,41 @@ After the 12-byte header, exactly `Payload Length` bytes of payload follow. If
 | `0x09` | UDP_BIND | Agent->Relay | 0 | Bind address (UTF-8 string) | Request the relay to open a UDP listener on the specified address/port. |
 | `0x0A` | UDP_DATA | Both | Non-zero | Addr length (1B) + source addr (variable) + UDP payload | Carry a UDP datagram. See UDP Tunneling documentation for payload format. |
 | `0x0B` | UDP_UNBIND | Agent->Relay | 0 | Bind address (UTF-8 string) | Request the relay to close a UDP listener. |
+| `0x0C` | UPDATE_MANIFEST | Reserved (enterprise) | 0 | Enterprise-defined | Reserved byte for the enterprise self-update manifest frame. Community builds do not emit this frame and ignore it on receipt. |
+| `0x0D` | UPDATE_BINARY | Reserved (enterprise) | 0 | Enterprise-defined | Reserved byte for the enterprise self-update binary payload frame. Community builds do not emit this frame and ignore it on receipt. |
+| `0x0E` | SERVICE_LIST | Agent->Relay | 0 | Newline-separated service names (UTF-8) | Advertise the agent's local service inventory to the relay. Sent once immediately after the mux handshake. Relay caches it for `GET /agents` exposure. See the SERVICE_LIST section below for payload rules. |
 
-Commands `0x0C` through `0xFF` are reserved for future protocol extensions.
+Commands `0x0F` through `0xFF` are reserved for future protocol extensions.
+
+### SERVICE_LIST payload format
+
+The `SERVICE_LIST` (0x0E) payload is a UTF-8 byte string containing zero or
+more service names separated by a single newline character (`\n`, byte
+`0x0A`). Service names themselves must not contain newline characters; the
+sender is responsible for ensuring this invariant. Empty tokens (arising
+from leading, trailing, or repeated newlines) are filtered out by the
+receiver.
+
+Rules:
+
+- Stream ID MUST be `0` (connection-level frame).
+- Payload MUST NOT exceed the global frame maximum (16 MB). In practice,
+  payloads are tens to low-hundreds of bytes.
+- The receiver MUST cap the number of parsed service names at 1024. Names
+  beyond that limit are discarded with a warning log entry.
+- The sender SHOULD skip emitting the frame entirely when it has no
+  services to advertise (empty payload is legal but wasteful).
+- Older agents that do not understand `SERVICE_LIST` never emit the frame.
+  The relay waits a bounded time (50 ms) for the frame and proceeds with
+  registration regardless; this is the forward-compat contract.
+
+### Reserved bytes (0x0C, 0x0D)
+
+Command bytes `0x0C` (`UPDATE_MANIFEST`) and `0x0D` (`UPDATE_BINARY`) are
+reserved for the enterprise self-update feature. They are defined in the
+community protocol enum so that community and enterprise builds agree on
+byte assignments and never collide. Community builds neither emit nor
+route these frames.
 
 ## Flags Bitfield
 

@@ -58,7 +58,7 @@ var _ Client = (*TunnelClient)(nil)
 
 // NewClient creates a TunnelClient. Use WithDialer to override the default
 // TLS dialer (useful for testing).
-func NewClient(cfg ClientConfig, logger *slog.Logger, opts ...ClientOption) *TunnelClient {
+func NewClient(cfg ClientConfig, logger *slog.Logger, opts ...ClientOption) *TunnelClient { //nolint:gocritic // hugeParam: cfg carries tls.Config and services slice; passing by value keeps construction site explicit.
 	c := &TunnelClient{
 		config:       cfg,
 		logger:       logger,
@@ -117,6 +117,17 @@ func (c *TunnelClient) Connect(ctx context.Context) error {
 		PingTimeout:          c.config.HeartbeatTimeout,
 		IdleTimeout:          60 * time.Second,
 	})
+
+	// Advertise the local service inventory to the relay so that the
+	// admin API can surface per-agent service metadata. Skip the send
+	// when we have nothing to advertise to avoid emitting empty frames
+	// on the wire.
+	if len(c.config.Services) > 0 {
+		if sendErr := mux.SendServiceList(c.config.Services); sendErr != nil {
+			c.logger.Warn("agent: send service list failed",
+				"error", sendErr)
+		}
+	}
 
 	c.mu.Lock()
 	c.conn = conn

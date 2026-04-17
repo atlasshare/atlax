@@ -501,6 +501,82 @@ func TestAdmin_GetAgent_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 }
 
+func TestAdmin_AgentListIncludesServicesAndCert(t *testing.T) {
+	addr, reg, _, _ := testAdminServer(t)
+
+	conn, agentMux := testConnectionPair("customer-001")
+	defer conn.Close()
+	defer agentMux.Close()
+
+	expiry := time.Date(2027, 1, 15, 12, 0, 0, 0, time.UTC)
+	conn.SetServices([]string{"samba", "http"})
+	conn.SetCertNotAfter(expiry)
+
+	require.NoError(t, reg.Register(context.Background(), "customer-001", conn))
+
+	// GET /agents
+	resp, err := http.Get("http://" + addr + "/agents")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var agents []AgentResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&agents))
+	require.Len(t, agents, 1)
+
+	assert.Equal(t, []string{"samba", "http"}, agents[0].Services)
+	assert.Equal(t, expiry.Format(time.RFC3339), agents[0].CertNotAfter)
+}
+
+func TestAdmin_GetAgent_IncludesServicesAndCert(t *testing.T) {
+	addr, reg, _, _ := testAdminServer(t)
+
+	conn, agentMux := testConnectionPair("customer-xyz")
+	defer conn.Close()
+	defer agentMux.Close()
+
+	expiry := time.Date(2027, 3, 1, 9, 30, 0, 0, time.UTC)
+	conn.SetServices([]string{"api"})
+	conn.SetCertNotAfter(expiry)
+
+	require.NoError(t, reg.Register(context.Background(), "customer-xyz", conn))
+
+	resp, err := http.Get("http://" + addr + "/agents/customer-xyz")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	assert.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var got AgentResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&got))
+	assert.Equal(t, []string{"api"}, got.Services)
+	assert.Equal(t, expiry.Format(time.RFC3339), got.CertNotAfter)
+}
+
+func TestAdmin_AgentListOmitsCertWhenZero(t *testing.T) {
+	// When CertNotAfter was never set (e.g., legacy connection), the API
+	// should still produce a stable RFC3339 string of the zero value.
+	addr, reg, _, _ := testAdminServer(t)
+
+	conn, agentMux := testConnectionPair("customer-legacy")
+	defer conn.Close()
+	defer agentMux.Close()
+
+	require.NoError(t, reg.Register(context.Background(), "customer-legacy", conn))
+
+	resp, err := http.Get("http://" + addr + "/agents")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	var agents []AgentResponse
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&agents))
+	require.Len(t, agents, 1)
+
+	// time.Time zero value round-trips through RFC3339; verify it's a parseable string.
+	_, parseErr := time.Parse(time.RFC3339, agents[0].CertNotAfter)
+	assert.NoError(t, parseErr)
+	assert.Empty(t, agents[0].Services)
+}
+
 func TestAdmin_PortByID_MethodNotAllowed(t *testing.T) {
 	addr, _, _, _ := testAdminServer(t)
 

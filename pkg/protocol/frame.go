@@ -21,19 +21,23 @@ const (
 type Command byte
 
 const (
-	CmdStreamOpen     Command = 0x01
-	CmdStreamData     Command = 0x02
-	CmdStreamClose    Command = 0x03
-	CmdStreamReset    Command = 0x04
-	CmdPing           Command = 0x05
-	CmdPong           Command = 0x06
-	CmdWindowUpdate   Command = 0x07
-	CmdGoAway         Command = 0x08
-	CmdUDPBind        Command = 0x09
-	CmdUDPData        Command = 0x0A
-	CmdUDPUnbind      Command = 0x0B
+	CmdStreamOpen   Command = 0x01
+	CmdStreamData   Command = 0x02
+	CmdStreamClose  Command = 0x03
+	CmdStreamReset  Command = 0x04
+	CmdPing         Command = 0x05
+	CmdPong         Command = 0x06
+	CmdWindowUpdate Command = 0x07
+	CmdGoAway       Command = 0x08
+	CmdUDPBind      Command = 0x09
+	CmdUDPData      Command = 0x0A
+	CmdUDPUnbind    Command = 0x0B
+	// 0x0C CmdUpdateManifest and 0x0D CmdUpdateBinary are reserved
+	// for enterprise self-update frames and remain defined here so
+	// community and enterprise builds share the same byte assignments.
 	CmdUpdateManifest Command = 0x0C
 	CmdUpdateBinary   Command = 0x0D
+	CmdServiceList    Command = 0x0E
 )
 
 // commandNames maps valid commands to their wire protocol names.
@@ -51,6 +55,7 @@ var commandNames = map[Command]string{
 	CmdUDPUnbind:      "UDP_UNBIND",
 	CmdUpdateManifest: "UPDATE_MANIFEST",
 	CmdUpdateBinary:   "UPDATE_BINARY",
+	CmdServiceList:    "SERVICE_LIST",
 }
 
 // String returns the human-readable name of the command.

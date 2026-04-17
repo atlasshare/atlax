@@ -13,6 +13,12 @@ import (
 	"github.com/atlasshare/atlax/pkg/protocol"
 )
 
+// serviceListWaitTimeout caps how long the relay waits for the agent's
+// optional CmdServiceList frame after mTLS. Kept low (50ms) so agents
+// that never send the frame -- including older versions -- see a
+// negligible penalty during registration. See plan Risk Area 3.
+const serviceListWaitTimeout = 50 * time.Millisecond
+
 // AgentListener accepts inbound agent TLS connections, performs mTLS
 // handshake, extracts identity, creates MuxSessions, and registers
 // agents in the registry.
@@ -139,6 +145,27 @@ func (l *AgentListener) handleConnection(ctx context.Context, conn net.Conn) {
 	})
 
 	liveConn := NewLiveConnection(customerID, mux, conn.RemoteAddr())
+
+	// Capture peer certificate expiry while we still have the TLS handle.
+	// Safe to index: HandshakeContext returned nil above, so the peer
+	// chain is populated when ClientAuth is RequireAndVerifyClientCert.
+	state := tlsConn.ConnectionState()
+	if len(state.PeerCertificates) > 0 {
+		liveConn.SetCertNotAfter(state.PeerCertificates[0].NotAfter)
+	}
+
+	// Wait briefly for the optional CmdServiceList frame the agent sends
+	// immediately after the mux starts. 50ms is well above typical LAN
+	// latency and keeps the penalty negligible for older agents that do
+	// not send the frame at all.
+	timer := time.NewTimer(serviceListWaitTimeout)
+	select {
+	case services := <-mux.ServiceListCh():
+		timer.Stop()
+		liveConn.SetServices(services)
+	case <-timer.C:
+		// Old agent or no services advertised; proceed without blocking.
+	}
 
 	if regErr := l.registry.Register(ctx, customerID, liveConn); regErr != nil {
 		l.logger.Error("relay: agent registration failed",

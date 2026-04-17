@@ -47,6 +47,12 @@ type AgentConnection interface {
 	// LastSeen returns the time of the most recent heartbeat or data frame.
 	LastSeen() time.Time
 
+	// Services returns the service names this agent forwards locally.
+	Services() []string
+
+	// CertNotAfter returns the agent's mTLS client certificate expiry.
+	CertNotAfter() time.Time
+
 	// Close terminates the agent connection.
 	Close() error
 }
@@ -54,9 +60,11 @@ type AgentConnection interface {
 // AgentInfo holds read-only metadata about a connected agent, suitable for
 // listing or monitoring endpoints.
 type AgentInfo struct {
-	CustomerID  string
-	RemoteAddr  string
-	ConnectedAt time.Time
-	LastSeen    time.Time
-	StreamCount int
+	CustomerID   string    `json:"customer_id"`
+	RemoteAddr   string    `json:"remote_addr"`
+	ConnectedAt  time.Time `json:"connected_at"`
+	LastSeen     time.Time `json:"last_seen"`
+	StreamCount  int       `json:"stream_count"`
+	Services     []string  `json:"services"`
+	CertNotAfter time.Time `json:"cert_not_after"`
 }

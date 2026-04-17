@@ -84,8 +84,8 @@ func (s *Relay) Stop(ctx context.Context) error {
 		s.logger.Warn("relay: list agents for shutdown", "error", err)
 	}
 
-	for _, info := range agents {
-		conn, lookupErr := s.registry.Lookup(ctx, info.CustomerID)
+	for i := range agents {
+		conn, lookupErr := s.registry.Lookup(ctx, agents[i].CustomerID)
 		if lookupErr != nil {
 			continue
 		}
@@ -96,8 +96,8 @@ func (s *Relay) Stop(ctx context.Context) error {
 	s.clientListener.Stop()
 
 	// Unregister all agents (closes mux sessions).
-	for _, info := range agents {
-		s.registry.Unregister(ctx, info.CustomerID) //nolint:errcheck // best-effort cleanup
+	for i := range agents {
+		s.registry.Unregister(ctx, agents[i].CustomerID) //nolint:errcheck // best-effort cleanup
 	}
 
 	s.logger.Info("relay: server stopped")

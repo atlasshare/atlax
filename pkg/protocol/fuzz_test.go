@@ -17,10 +17,14 @@ func FuzzReadFrame(f *testing.F) {
 		CmdPing, CmdPong, CmdWindowUpdate, CmdGoAway,
 		CmdUDPBind, CmdUDPData, CmdUDPUnbind,
 		CmdUpdateManifest, CmdUpdateBinary,
+		CmdServiceList,
 	} {
 		frame := validFrame(cmd, 0, nil)
 		f.Add(frame)
 	}
+
+	// Seed: SERVICE_LIST payload with newline-separated services
+	f.Add(validFrame(CmdServiceList, 0, []byte("samba\nhttp\napi")))
 
 	// Seed: frame with payload
 	f.Add(validFrame(CmdStreamData, 1, []byte("hello")))

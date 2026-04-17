@@ -18,6 +18,13 @@ type LiveConnection struct {
 
 	mu       sync.Mutex
 	lastSeen time.Time
+
+	// servMu guards the mutable service list and certificate expiry.
+	// Kept separate from mu so high-frequency heartbeat updates do not
+	// contend with service-list reads from the admin API.
+	servMu       sync.RWMutex
+	services     []string
+	certNotAfter time.Time
 }
 
 // Compile-time interface check.
@@ -56,6 +63,54 @@ func (c *LiveConnection) UpdateLastSeen() {
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	c.lastSeen = time.Now()
+}
+
+// SetServices replaces the cached service name list advertised by the
+// agent via CmdServiceList. A defensive copy is stored so later
+// mutation of the caller's slice does not affect registry state.
+func (c *LiveConnection) SetServices(services []string) {
+	var copied []string
+	if len(services) > 0 {
+		copied = make([]string, len(services))
+		copy(copied, services)
+	}
+	c.servMu.Lock()
+	c.services = copied
+	c.servMu.Unlock()
+}
+
+// Services returns a defensive copy of the service names advertised by
+// the agent. The empty slice is returned when no CmdServiceList frame
+// has been received (e.g., an older agent).
+func (c *LiveConnection) Services() []string {
+	c.servMu.RLock()
+	defer c.servMu.RUnlock()
+	if len(c.services) == 0 {
+		return nil
+	}
+	out := make([]string, len(c.services))
+	copy(out, c.services)
+	return out
+}
+
+// SetCertNotAfter records the peer certificate expiry, captured once
+// immediately after the TLS handshake. No lock is strictly required
+// because the field is written exactly once during connection setup
+// and read thereafter, but we take the write lock for symmetry and
+// to keep the memory model explicit.
+func (c *LiveConnection) SetCertNotAfter(t time.Time) {
+	c.servMu.Lock()
+	c.certNotAfter = t
+	c.servMu.Unlock()
+}
+
+// CertNotAfter returns the NotAfter timestamp of the peer certificate
+// captured at connection time. Returns the zero value if the
+// certificate metadata was not populated (e.g., a test fixture).
+func (c *LiveConnection) CertNotAfter() time.Time {
+	c.servMu.RLock()
+	defer c.servMu.RUnlock()
+	return c.certNotAfter
 }
 
 // Close terminates the mux session and underlying transport.

@@ -153,11 +153,13 @@ func (r *MemoryRegistry) ListConnectedAgents(
 	infos := make([]AgentInfo, 0, len(r.agents))
 	for _, conn := range r.agents {
 		infos = append(infos, AgentInfo{
-			CustomerID:  conn.CustomerID(),
-			RemoteAddr:  conn.RemoteAddr().String(),
-			ConnectedAt: conn.ConnectedAt(),
-			LastSeen:    conn.LastSeen(),
-			StreamCount: conn.Muxer().NumStreams(),
+			CustomerID:   conn.CustomerID(),
+			RemoteAddr:   conn.RemoteAddr().String(),
+			ConnectedAt:  conn.ConnectedAt(),
+			LastSeen:     conn.LastSeen(),
+			StreamCount:  conn.Muxer().NumStreams(),
+			Services:     conn.Services(),
+			CertNotAfter: conn.CertNotAfter(),
 		})
 	}
 	return infos, nil
