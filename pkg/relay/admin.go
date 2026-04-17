@@ -31,6 +31,13 @@ type AdminServer struct {
 	socketPath     string
 	startTime      time.Time
 	ctx            context.Context // lifecycle context for spawned port listeners
+
+	// Static cert paths resolved at construction for /status cert
+	// expiry reporting. Stored as-is; parsed on each /status call.
+	certPaths []CertNamePath
+	// Build-injected or operator-supplied version string surfaced on
+	// /status as config_version.
+	configVersion string
 }
 
 // AdminConfig holds settings for the admin server.
@@ -53,6 +60,17 @@ type AdminConfig struct {
 	// Store persists runtime port mutations to the sidecar JSON file.
 	// If nil, mutations are not persisted (relay.yaml remains authoritative).
 	Store *SidecarStore
+
+	// CertPaths lists name+path pairs for certificates whose expiry
+	// should be reported by /status. Each entry is parsed on demand;
+	// missing or malformed files are skipped with a warning. Paths
+	// come from trusted config, not user input.
+	CertPaths []CertNamePath
+
+	// ConfigVersion is the version string surfaced by /status as
+	// config_version. Typically populated from build-injected
+	// pkg/config.Version, or an operator-supplied override.
+	ConfigVersion string
 }
 
 // HealthResponse is the JSON body returned by /healthz.
@@ -114,6 +132,11 @@ type PortUpdateRequest struct {
 
 // NewAdminServer creates an admin server with the full API.
 func NewAdminServer(cfg *AdminConfig) *AdminServer {
+	// Defensive copy of CertPaths so later mutations to the caller's
+	// slice cannot affect the admin server's view.
+	certPaths := make([]CertNamePath, len(cfg.CertPaths))
+	copy(certPaths, cfg.CertPaths)
+
 	a := &AdminServer{
 		registry:       cfg.Registry,
 		router:         cfg.Router,
@@ -123,6 +146,8 @@ func NewAdminServer(cfg *AdminConfig) *AdminServer {
 		logger:         cfg.Logger,
 		socketPath:     cfg.SocketPath,
 		startTime:      time.Now(),
+		certPaths:      certPaths,
+		configVersion:  cfg.ConfigVersion,
 	}
 
 	mux := http.NewServeMux()
@@ -138,6 +163,7 @@ func NewAdminServer(cfg *AdminConfig) *AdminServer {
 	mux.HandleFunc("/agents", a.handleAgents)
 	mux.HandleFunc("/agents/", a.handleAgentByID)
 	mux.HandleFunc("/stats", a.handleStats)
+	mux.HandleFunc("/status", a.handleStatus)
 
 	a.server = &http.Server{
 		Addr:              cfg.Addr,
