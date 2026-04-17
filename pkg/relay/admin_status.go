@@ -58,8 +58,8 @@ func (a *AdminServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	}
 
 	totalStreams := 0
-	for _, ag := range agents {
-		totalStreams += ag.StreamCount
+	for i := range agents {
+		totalStreams += agents[i].StreamCount
 	}
 
 	ports := a.router.ListPorts()
