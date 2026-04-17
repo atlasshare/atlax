@@ -46,13 +46,13 @@ type CertNamePath struct {
 // "degraded" in future revisions.
 func (a *AdminServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	if r.Method != http.MethodGet {
-		http.Error(w, `{"error":"method not allowed"}`, http.StatusMethodNotAllowed)
+		writeError(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
 	agents, err := a.registry.ListConnectedAgents(r.Context())
 	if err != nil {
-		http.Error(w, `{"error":"internal"}`, http.StatusInternalServerError)
+		writeError(w, "internal", http.StatusInternalServerError)
 		return
 	}
 
