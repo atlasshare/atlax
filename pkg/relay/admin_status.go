@@ -21,6 +21,7 @@ type StatusResponse struct {
 	PortsActive     int          `json:"ports_active"`
 	ConfigVersion   string       `json:"config_version"`
 	RelayCerts      []CertExpiry `json:"relay_certs"`
+	AgentCerts      []CertExpiry `json:"agent_certs"`
 }
 
 // CertExpiry describes when a single relay-side certificate expires.
@@ -64,6 +65,7 @@ func (a *AdminServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 	ports := a.router.ListPorts()
 	uptime := time.Since(a.startTime)
 	relayCerts := a.collectRelayCerts()
+	agentCerts := collectAgentCerts(agents)
 
 	writeJSON(w, StatusResponse{
 		Status:          "ok",
@@ -74,6 +76,7 @@ func (a *AdminServer) handleStatus(w http.ResponseWriter, r *http.Request) {
 		PortsActive:     len(ports),
 		ConfigVersion:   a.configVersion,
 		RelayCerts:      relayCerts,
+		AgentCerts:      agentCerts,
 	})
 }
 
@@ -95,6 +98,26 @@ func (a *AdminServer) collectRelayCerts() []CertExpiry {
 			continue
 		}
 		out = append(out, entry)
+	}
+	return out
+}
+
+// collectAgentCerts builds a CertExpiry entry for each connected agent
+// whose CertNotAfter is non-zero. The slice is always non-nil.
+func collectAgentCerts(agents []AgentInfo) []CertExpiry {
+	out := make([]CertExpiry, 0, len(agents))
+	for i := range agents {
+		ag := &agents[i]
+		if ag.CertNotAfter.IsZero() {
+			continue
+		}
+		now := time.Now()
+		daysLeft := int(ag.CertNotAfter.Sub(now).Hours() / 24)
+		out = append(out, CertExpiry{
+			Name:      ag.CustomerID,
+			ExpiresAt: ag.CertNotAfter.UTC().Format(time.RFC3339),
+			DaysLeft:  daysLeft,
+		})
 	}
 	return out
 }

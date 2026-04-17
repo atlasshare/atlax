@@ -156,6 +156,36 @@ func TestAdmin_Status_AgentCount(t *testing.T) {
 	assert.GreaterOrEqual(t, status.StreamsActive, 0)
 }
 
+func TestAdmin_Status_AgentCerts(t *testing.T) {
+	addr, reg, _ := testAdminServerWithStatus(t, nil, "test")
+
+	// Register an agent with a cert expiry set.
+	conn, agentMux := testConnectionPair("customer-cert-1")
+	defer conn.Close()
+	defer agentMux.Close()
+	expiry := time.Now().Add(60 * 24 * time.Hour) // 60 days
+	conn.SetCertNotAfter(expiry)
+	require.NoError(t, reg.Register(context.Background(), "customer-cert-1", conn))
+
+	status := getStatus(t, addr)
+	require.Len(t, status.AgentCerts, 1)
+	assert.Equal(t, "customer-cert-1", status.AgentCerts[0].Name)
+	assert.True(t, status.AgentCerts[0].DaysLeft >= 59)
+}
+
+func TestAdmin_Status_AgentCerts_ZeroNotAfterOmitted(t *testing.T) {
+	addr, reg, _ := testAdminServerWithStatus(t, nil, "test")
+
+	// Register an agent with no cert expiry (zero value).
+	conn, agentMux := testConnectionPair("customer-no-cert")
+	defer conn.Close()
+	defer agentMux.Close()
+	require.NoError(t, reg.Register(context.Background(), "customer-no-cert", conn))
+
+	status := getStatus(t, addr)
+	assert.Empty(t, status.AgentCerts)
+}
+
 func TestAdmin_Status_PortCount(t *testing.T) {
 	addr, _, router := testAdminServerWithStatus(t, nil, "test")
 
