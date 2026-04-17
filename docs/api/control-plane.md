@@ -198,10 +198,17 @@ List all connected agents.
     "remote_addr": "203.0.113.50:41234",
     "connected_at": "2026-03-14T08:15:30Z",
     "last_seen": "2026-03-14T10:30:45Z",
-    "stream_count": 12
+    "stream_count": 12,
+    "services": ["smb", "http"],
+    "cert_not_after": "2026-07-15T00:00:00Z"
   }
 ]
 ```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `services` | `[]string` | Service names this agent forwards locally. Populated from the `CmdServiceList` (0x0E) frame the agent sends once after mTLS handshake. Empty array if the agent did not emit the frame within 50ms or is an older version. |
+| `cert_not_after` | string (RFC3339) | Agent's mTLS client certificate expiry. Zero value (`"0001-01-01T00:00:00Z"`) if not yet captured. |
 
 ---
 
@@ -209,7 +216,7 @@ List all connected agents.
 
 Inspect a single connected agent.
 
-**Success:** `200 OK` with the same `AgentResponse` object as `GET /agents`.
+**Success:** `200 OK` with the same `AgentResponse` object as `GET /agents` (including `services` and `cert_not_after`).
 
 **Errors:**
 - `400 Bad Request` -- empty customer ID
