@@ -95,6 +95,41 @@ Relay uptime and current connection state.
 
 ---
 
+### GET /status
+
+Unified relay status snapshot for operator dashboards and the `ats` CLI. Superset of `/stats` with cert expiry data.
+
+**Response:**
+
+```json
+{
+  "status": "ok",
+  "uptime": "1h23m45s",
+  "uptime_seconds": 5025.0,
+  "agents_connected": 2,
+  "streams_active": 15,
+  "ports_active": 3,
+  "config_version": "v0.1.3",
+  "relay_certs": [
+    { "name": "relay", "expires_at": "2026-07-15T00:00:00Z", "days_left": 89 }
+  ],
+  "agent_certs": [
+    { "name": "customer-001", "expires_at": "2026-07-15T00:00:00Z", "days_left": 89 }
+  ]
+}
+```
+
+| Field | Description |
+|-------|-------------|
+| `relay_certs` | Expiry of relay-side certificates (parsed from config TLS paths on each call) |
+| `agent_certs` | Expiry of connected agents' mTLS client certificates (from `CmdServiceList` handshake; omitted for agents with zero-value NotAfter) |
+
+Missing or malformed cert files are skipped with a warn log; the endpoint always returns 200. Empty arrays serialize as `[]`, not `null`. No secret material or cert body content is exposed -- only NotAfter and a display name.
+
+**Error:** `405 Method Not Allowed` on non-GET.
+
+---
+
 ### GET /ports
 
 List all active port-to-customer mappings.
@@ -182,6 +217,35 @@ Remove a port mapping and stop the TCP listener.
 - `405 Method Not Allowed` -- non-DELETE method
 
 **Behavior:** Removes the routing entry AND stops the TCP listener. If the listener was started from config (not the admin API), the stop is a no-op and a warning is logged.
+
+---
+
+### PUT /ports/{port}
+
+Update the mutable fields of an existing port mapping without delete-recreate. The tenant binding (`customer_id`) is immutable through this endpoint.
+
+**Request:**
+
+```json
+{
+  "service": "smb-v2",
+  "listen_addr": "127.0.0.1",
+  "max_streams": 200
+}
+```
+
+At least one field must be present. `max_streams` uses pointer semantics: omitted or `null` preserves the current value; explicit `0` means unlimited; positive sets a new cap. `listen_addr` must be a literal IP.
+
+**Success:** `200 OK` with the updated `PortResponse`.
+
+**Errors:**
+- `400 Bad Request` -- empty body, invalid JSON, invalid listen_addr, or negative max_streams
+- `404 Not Found` -- no mapping for this port
+- `405 Method Not Allowed` -- methods other than GET, PUT, or DELETE
+
+**Security invariant:** `customer_id` is **immutable** via PUT. The request struct has no customer_id field and the router preserves the existing binding verbatim. A tenant reassignment requires an explicit DELETE then POST, each audited separately.
+
+**Audit event:** `admin.port_updated`
 
 ---
 
