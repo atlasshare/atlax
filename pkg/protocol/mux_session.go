@@ -568,9 +568,14 @@ func (m *MuxSession) ServiceListCh() <-chan []string {
 }
 
 // SendServiceList encodes services as a newline-separated UTF-8 payload
-// and enqueues a CmdServiceList frame at PriorityControl. The caller is
-// responsible for not including newline characters inside service names.
+// and enqueues a CmdServiceList frame at PriorityControl.
 func (m *MuxSession) SendServiceList(services []string) error {
+	for _, name := range services {
+		if strings.ContainsAny(name, "\n\r") {
+			return fmt.Errorf("mux: service list: %w: service name contains newline: %q",
+				ErrInvalidFrame, name)
+		}
+	}
 	payload := []byte(strings.Join(services, "\n"))
 	if len(payload) > MaxPayloadSize {
 		return fmt.Errorf("mux: service list: %w: payload size %d exceeds max %d",

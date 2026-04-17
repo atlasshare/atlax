@@ -158,10 +158,12 @@ func (l *AgentListener) handleConnection(ctx context.Context, conn net.Conn) {
 	// immediately after the mux starts. 50ms is well above typical LAN
 	// latency and keeps the penalty negligible for older agents that do
 	// not send the frame at all.
+	timer := time.NewTimer(serviceListWaitTimeout)
 	select {
 	case services := <-mux.ServiceListCh():
+		timer.Stop()
 		liveConn.SetServices(services)
-	case <-time.After(serviceListWaitTimeout):
+	case <-timer.C:
 		// Old agent or no services advertised; proceed without blocking.
 	}
 

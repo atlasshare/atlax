@@ -47,6 +47,12 @@ type AgentConnection interface {
 	// LastSeen returns the time of the most recent heartbeat or data frame.
 	LastSeen() time.Time
 
+	// Services returns the service names this agent forwards locally.
+	Services() []string
+
+	// CertNotAfter returns the agent's mTLS client certificate expiry.
+	CertNotAfter() time.Time
+
 	// Close terminates the agent connection.
 	Close() error
 }
