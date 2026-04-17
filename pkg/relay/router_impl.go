@@ -107,6 +107,31 @@ func (r *PortRouter) ListPorts() []PortInfo {
 	return out
 }
 
+// UpdatePortMapping replaces the mutable fields (service, listenAddr,
+// maxStreams) of an existing port mapping. The customerID is IMMUTABLE:
+// the port-to-tenant binding established at AddPortMapping is preserved
+// unchanged so the tenant boundary cannot be redrawn via this method.
+//
+// Returns ErrPortNotFound if no mapping exists for the given port.
+func (r *PortRouter) UpdatePortMapping(port int, service, listenAddr string, maxStreams int) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+
+	entry, ok := r.portMap[port]
+	if !ok {
+		return ErrPortNotFound
+	}
+
+	// customerID carried over verbatim from the existing entry.
+	r.portMap[port] = portEntry{
+		customerID: entry.customerID,
+		service:    service,
+		maxStreams: maxStreams,
+		listenAddr: listenAddr,
+	}
+	return nil
+}
+
 // RemovePortMapping releases a previously assigned port mapping.
 func (r *PortRouter) RemovePortMapping(customerID string, port int) error {
 	r.mu.Lock()

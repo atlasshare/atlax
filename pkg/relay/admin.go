@@ -3,6 +3,7 @@ package relay
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log/slog"
 	"net"
@@ -95,6 +96,20 @@ type PortCreateRequest struct {
 	Service    string `json:"service"`
 	MaxStreams int    `json:"max_streams"`
 	ListenAddr string `json:"listen_addr"`
+}
+
+// PortUpdateRequest is the JSON body for PUT /ports/{port}. Only the
+// fields supplied by the caller are mutated; the customer_id is NEVER
+// accepted from the request body -- the tenant binding established at
+// port creation is immutable via this endpoint.
+//
+// MaxStreams uses *int so a zero value sent by the caller can be
+// distinguished from "field omitted"; omitting the field preserves the
+// existing limit, while an explicit 0 means "unlimited".
+type PortUpdateRequest struct {
+	Service    string `json:"service,omitempty"`
+	MaxStreams *int   `json:"max_streams,omitempty"`
+	ListenAddr string `json:"listen_addr,omitempty"`
 }
 
 // NewAdminServer creates an admin server with the full API.
@@ -283,6 +298,8 @@ func (a *AdminServer) handlePortByID(w http.ResponseWriter, r *http.Request) {
 	switch r.Method {
 	case http.MethodGet:
 		a.getPort(w, port)
+	case http.MethodPut:
+		a.updatePort(w, r, port)
 	case http.MethodDelete:
 		a.deletePort(w, r, port)
 	default:
@@ -405,6 +422,121 @@ func (a *AdminServer) createPort(w http.ResponseWriter, r *http.Request) {
 		ListenAddr: listenAddr,
 		MaxStreams: req.MaxStreams,
 	})
+}
+
+// updatePort mutates the service, listen_addr, and/or max_streams of an
+// existing port mapping. customer_id is deliberately not accepted in the
+// request body; the tenant binding established at creation time is
+// preserved. Omitted fields default to the existing value.
+func (a *AdminServer) updatePort(w http.ResponseWriter, r *http.Request, port int) {
+	req, ok := decodePortUpdateRequest(w, r)
+	if !ok {
+		return
+	}
+
+	// Read existing mapping so we can preserve any fields the caller did
+	// not supply. The update is applied as a full replacement inside the
+	// router's write lock; the only field we keep from `existing` that
+	// the router also protects (customerID) is never overwritten by us.
+	existing, found := a.router.GetPort(port)
+	if !found {
+		http.Error(w, `{"error":"port not found"}`, http.StatusNotFound)
+		return
+	}
+
+	service, listenAddr, maxStreams := mergePortUpdate(existing, req)
+
+	if err := a.router.UpdatePortMapping(port, service, listenAddr, maxStreams); err != nil {
+		if errors.Is(err, ErrPortNotFound) {
+			http.Error(w, `{"error":"port not found"}`, http.StatusNotFound)
+			return
+		}
+		writeError(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+
+	a.persistPortUpdate(port, existing.CustomerID)
+	a.emitAudit(r.Context(), audit.ActionAdminPortUpdated,
+		fmt.Sprintf("%d", port), existing.CustomerID,
+		map[string]string{
+			"service":     service,
+			"listen_addr": listenAddr,
+			"max_streams": strconv.Itoa(maxStreams),
+		})
+
+	writeJSON(w, PortResponse{
+		Port:       port,
+		CustomerID: existing.CustomerID,
+		Service:    service,
+		ListenAddr: listenAddr,
+		MaxStreams: maxStreams,
+	})
+}
+
+// decodePortUpdateRequest parses and validates a PortUpdateRequest. On
+// any validation failure it writes the HTTP error response and returns
+// ok=false so the caller stops processing.
+func decodePortUpdateRequest(w http.ResponseWriter, r *http.Request) (PortUpdateRequest, bool) {
+	var req PortUpdateRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, `{"error":"invalid JSON"}`, http.StatusBadRequest)
+		return req, false
+	}
+	// A fully-empty request is treated as a client error so the operator
+	// sees a clear signal instead of a silent no-op.
+	if req.Service == "" && req.ListenAddr == "" && req.MaxStreams == nil {
+		http.Error(w,
+			`{"error":"at least one of service, listen_addr, max_streams must be set"}`,
+			http.StatusBadRequest)
+		return req, false
+	}
+	if req.ListenAddr != "" && net.ParseIP(req.ListenAddr) == nil {
+		http.Error(w, `{"error":"listen_addr must be a valid IP address"}`, http.StatusBadRequest)
+		return req, false
+	}
+	if req.MaxStreams != nil && *req.MaxStreams < 0 {
+		http.Error(w, `{"error":"max_streams must be non-negative"}`, http.StatusBadRequest)
+		return req, false
+	}
+	return req, true
+}
+
+// mergePortUpdate applies non-empty request fields on top of the
+// existing PortInfo, returning the effective (service, listenAddr,
+// maxStreams) triple. customerID is NOT returned here because callers
+// must always take it from `existing`; the tenant binding is immutable.
+func mergePortUpdate(existing PortInfo, req PortUpdateRequest) (service, listenAddr string, maxStreams int) {
+	service = existing.Service
+	if req.Service != "" {
+		service = req.Service
+	}
+	listenAddr = existing.ListenAddr
+	if req.ListenAddr != "" {
+		listenAddr = req.ListenAddr
+	}
+	maxStreams = existing.MaxStreams
+	if req.MaxStreams != nil {
+		maxStreams = *req.MaxStreams
+	}
+	return service, listenAddr, maxStreams
+}
+
+// persistPortUpdate writes the current port snapshot to the sidecar
+// store and/or logs a warning if persistence is not configured. Errors
+// are logged but do not fail the calling request: the mutation has
+// already been applied to the router, and the client should know the
+// change took effect at runtime.
+func (a *AdminServer) persistPortUpdate(port int, customerID string) {
+	if a.store != nil {
+		if saveErr := a.store.SaveCurrentState(a.router.ListPorts()); saveErr != nil {
+			a.logger.Warn("admin: failed to persist port update to sidecar",
+				"port", port, "error", saveErr)
+		}
+		return
+	}
+	a.logger.Warn("admin: port mapping updated at runtime is not persisted; also update relay.yaml to survive restart",
+		"port", port,
+		"customer_id", customerID)
 }
 
 func (a *AdminServer) deletePort(w http.ResponseWriter, r *http.Request, port int) {
