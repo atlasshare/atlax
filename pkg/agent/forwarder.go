@@ -20,4 +20,8 @@ type ServiceForwarderConfig struct {
 	DialTimeout time.Duration
 	IdleTimeout time.Duration
 	BufferSize  int
+	// LingerTimeout bounds how long Forward waits for the peer to close
+	// its half of the connection after the other half has already closed.
+	// When it expires the stream is reset and the local socket released.
+	LingerTimeout time.Duration
 }

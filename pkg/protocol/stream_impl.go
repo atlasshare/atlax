@@ -23,6 +23,10 @@ type StreamSession struct {
 	// drain goroutine reads from this channel and emits STREAM_DATA
 	// frames to the transport.
 	writeOut chan []byte
+	// finCh is signaled exactly once when the local side closes. The
+	// muxer drain loop turns it into STREAM_CLOSE only after every write
+	// queued on writeOut has been sent, preserving ordering.
+	finCh chan struct{}
 
 	// closedCh is closed when the stream reaches Closed or Reset state.
 	closedCh  chan struct{}
@@ -53,6 +57,7 @@ func NewStreamSession(id uint32, config StreamConfig) *StreamSession {
 		state:      StateIdle,
 		recvWindow: config.InitialWindowSize,
 		writeOut:   make(chan []byte, 64),
+		finCh:      make(chan struct{}, 1),
 		closedCh:   make(chan struct{}),
 	}
 	s.cond = sync.NewCond(&s.mu)
@@ -164,6 +169,7 @@ func (s *StreamSession) Close() error {
 
 	if shouldNotify {
 		s.localCloseOnce.Do(func() {
+			s.finCh <- struct{}{}
 			if s.onLocalClose != nil {
 				s.onLocalClose(s.id)
 			}
