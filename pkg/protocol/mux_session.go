@@ -133,6 +133,10 @@ func (m *MuxSession) OpenStreamWithPayload(ctx context.Context, payload []byte) 
 	})
 	m.setupStreamClose(s)
 	m.setupStreamReset(s)
+	// Mark Open before the OPEN frame leaves: the peer may FIN or RESET
+	// the stream right behind its ACK, and those frames must land on a
+	// stream that is already in the Open state or they are ignored.
+	s.Open()
 	m.streams[id] = s
 	m.mu.Unlock()
 
@@ -156,7 +160,6 @@ func (m *MuxSession) OpenStreamWithPayload(ctx context.Context, payload []byte) 
 	// Wait for ACK
 	select {
 	case <-ackCh:
-		s.Open()
 		return s, nil
 	case <-ctx.Done():
 		m.cleanupPendingOpen(id)
@@ -422,6 +425,9 @@ func (m *MuxSession) handleStreamOpen(f *Frame) {
 	}
 
 	// Remote peer is opening a new stream.
+	if !m.acceptPeerOpen(f.StreamID) {
+		return
+	}
 	cfg := StreamConfig{InitialWindowSize: m.config.InitialStreamWindow}
 	s := NewStreamSession(f.StreamID, cfg)
 	m.setupStreamClose(s)
@@ -501,7 +507,7 @@ func (m *MuxSession) handleStreamReset(f *Frame) {
 	m.mu.Lock()
 	if _, stillPresent := m.streams[f.StreamID]; stillPresent {
 		delete(m.streams, f.StreamID)
-		m.freeIDs = append(m.freeIDs, f.StreamID)
+		m.freeID(f.StreamID)
 	}
 	m.mu.Unlock()
 }
@@ -636,7 +642,7 @@ func (m *MuxSession) maybeRemoveStream(id uint32, s *StreamSession) {
 	if s.State() == StateClosed || s.State() == StateReset {
 		m.mu.Lock()
 		delete(m.streams, id)
-		m.freeIDs = append(m.freeIDs, id)
+		m.freeID(id)
 		m.mu.Unlock()
 	}
 }
@@ -647,7 +653,7 @@ func (m *MuxSession) removeStream(id uint32) {
 	s, ok := m.streams[id]
 	if ok {
 		delete(m.streams, id)
-		m.freeIDs = append(m.freeIDs, id)
+		m.freeID(id)
 	}
 	m.mu.Unlock()
 
@@ -688,7 +694,7 @@ func (m *MuxSession) setupStreamReset(s *StreamSession) {
 		_, exists := m.streams[streamID]
 		if exists {
 			delete(m.streams, streamID)
-			m.freeIDs = append(m.freeIDs, streamID)
+			m.freeID(streamID)
 		}
 		m.mu.Unlock()
 
@@ -705,6 +711,50 @@ func (m *MuxSession) setupStreamReset(s *StreamSession) {
 			Payload:  payload,
 		}, PriorityControl)
 	})
+}
+
+// freeID returns a stream ID to the local free list. Only IDs of the
+// local parity are recycled: relay IDs are odd, agent IDs are even, and
+// reusing a peer-owned ID lets both sides pick the same ID at once.
+func (m *MuxSession) freeID(id uint32) {
+	if id%2 == m.nextStreamID%2 {
+		m.freeIDs = append(m.freeIDs, id)
+	}
+}
+
+// ownsID reports whether id belongs to the local parity space.
+func (m *MuxSession) ownsID(id uint32) bool {
+	return id%2 == m.nextStreamID%2
+}
+
+// acceptPeerOpen validates a peer-initiated STREAM_OPEN. An open for an
+// ID that is already active is dropped without touching the live stream
+// on either side: answering it with a reset would tear down the peer's
+// working stream too. An open for an ID in the local parity space is a
+// protocol violation with nothing live behind it, so it is answered with
+// STREAM_RESET and the peer's pending open fails promptly.
+func (m *MuxSession) acceptPeerOpen(id uint32) bool {
+	m.mu.Lock()
+	_, active := m.streams[id]
+	m.mu.Unlock()
+	switch {
+	case active:
+		m.logger.Warn("mux: dropping duplicate stream open for active stream", "stream_id", id)
+		return false
+	case m.ownsID(id):
+		m.logger.Warn("mux: rejecting stream open in local parity space", "stream_id", id)
+		payload := make([]byte, 4)
+		binary.BigEndian.PutUint32(payload, ResetCodeProtocolError)
+		m.writeQueue.Enqueue(&Frame{
+			Version:  ProtocolVersion,
+			Command:  CmdStreamReset,
+			StreamID: id,
+			Payload:  payload,
+		}, PriorityControl)
+		return false
+	default:
+		return true
+	}
 }
 
 // cleanupPendingOpen removes a pending open channel by stream ID.

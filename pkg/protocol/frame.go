@@ -115,3 +115,8 @@ type FrameReader interface {
 type FrameWriter interface {
 	WriteFrame(w io.Writer, f *Frame) error
 }
+
+// ResetCodeProtocolError is sent in STREAM_RESET when the peer violated
+// the protocol, e.g. opened a stream with an ID that is already active
+// or that belongs to the local parity space.
+const ResetCodeProtocolError uint32 = 2
