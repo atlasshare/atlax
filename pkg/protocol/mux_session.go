@@ -317,26 +317,65 @@ func (m *MuxSession) writeLoop() {
 }
 
 // drainStream reads from a stream's write output channel and enqueues
-// STREAM_DATA frames into the write queue.
+// STREAM_DATA frames into the write queue. On local close it flushes
+// whatever is still queued and only then emits STREAM_CLOSE+FIN, so a
+// Close() issued right after Write() can never overtake the data.
 func (m *MuxSession) drainStream(s *StreamSession) {
 	for {
 		select {
-		case data, ok := <-s.writeOut:
-			if !ok {
+		case data := <-s.writeOut:
+			m.enqueueStreamData(s, data)
+		case <-s.finCh:
+			m.flushAndFIN(s)
+			return
+		case <-s.closedCh:
+			if s.State() == StateReset {
 				return
 			}
-			m.writeQueue.Enqueue(&Frame{
-				Version:  ProtocolVersion,
-				Command:  CmdStreamData,
-				StreamID: s.id,
-				Payload:  data,
-			}, PriorityData)
-		case <-s.closedCh:
+			m.awaitFIN(s)
 			return
 		case <-m.closeCh:
 			return
 		}
 	}
+}
+
+// awaitFIN handles a graceful full close observed via closedCh before
+// the FIN signal was picked up: wait for it, then flush and send FIN.
+func (m *MuxSession) awaitFIN(s *StreamSession) {
+	select {
+	case <-s.finCh:
+		m.flushAndFIN(s)
+	case <-m.closeCh:
+	}
+}
+
+// flushAndFIN drains every write already buffered on writeOut, then
+// enqueues STREAM_CLOSE+FIN behind them.
+func (m *MuxSession) flushAndFIN(s *StreamSession) {
+	for {
+		select {
+		case data := <-s.writeOut:
+			m.enqueueStreamData(s, data)
+		default:
+			m.writeQueue.Enqueue(&Frame{
+				Version:  ProtocolVersion,
+				Command:  CmdStreamClose,
+				Flags:    FlagFIN,
+				StreamID: s.id,
+			}, PriorityData)
+			return
+		}
+	}
+}
+
+func (m *MuxSession) enqueueStreamData(s *StreamSession, data []byte) {
+	m.writeQueue.Enqueue(&Frame{
+		Version:  ProtocolVersion,
+		Command:  CmdStreamData,
+		StreamID: s.id,
+		Payload:  data,
+	}, PriorityData)
 }
 
 // handleFrame dispatches an incoming frame by command type.
@@ -620,17 +659,11 @@ func (m *MuxSession) removeStream(id uint32) {
 	}
 }
 
-// setupStreamClose registers the onLocalClose callback so that
-// Stream.Close() emits a STREAM_CLOSE+FIN frame on the wire and
-// cleans up the stream if fully closed.
+// setupStreamClose registers the onLocalClose callback so that a
+// fully closed stream is cleaned up. The STREAM_CLOSE+FIN frame itself
+// is emitted by drainStream, in order behind any buffered writes.
 func (m *MuxSession) setupStreamClose(s *StreamSession) {
 	s.SetOnLocalClose(func(streamID uint32) {
-		m.writeQueue.Enqueue(&Frame{
-			Version:  ProtocolVersion,
-			Command:  CmdStreamClose,
-			Flags:    FlagFIN,
-			StreamID: streamID,
-		}, PriorityData)
 		m.maybeRemoveStream(streamID, s)
 	})
 }

@@ -52,6 +52,6 @@ dist/
 # Debug
 __debug_bin*
 
-agent
+/agent
 loadtest
-relay
+/relay
