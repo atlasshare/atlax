@@ -75,7 +75,9 @@ jobs:
         run: go vet ./...
 
       - name: Install staticcheck
-        run: go install honnef.co/go/tools/cmd/staticcheck@latest
+        # Pinned: @latest tracks the newest Go and breaks the build whenever
+        # it moves ahead of go.mod. Bump together with the Go version.
+        run: go install honnef.co/go/tools/cmd/staticcheck@v0.8.1
 
       - name: Run staticcheck
         run: staticcheck ./...
