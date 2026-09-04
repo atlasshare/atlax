@@ -11,6 +11,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+
+	"github.com/atlasshare/atlax/internal/testcerts"
 )
 
 func TestFileStore_LoadCertificate_Valid(t *testing.T) {
@@ -174,9 +176,17 @@ func TestFileStore_WatchForRotation_InitialFingerprintError(t *testing.T) {
 }
 
 // testCertsDir returns the path to the project's dev certificates.
+// testCertsDir returns a directory with the development certificate
+// hierarchy, generated at test time so the suite never depends on the
+// untracked certs/ directory or its 90-day leaf certificates.
 func testCertsDir() string {
-	// Tests run from pkg/auth/, certs are at project root
-	return filepath.Join("..", "..", "certs")
+	return testcerts.MustDir()
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	testcerts.Cleanup()
+	os.Exit(code)
 }
 
 func TestValidateChainCertFile_Chain(t *testing.T) {
