@@ -133,6 +133,10 @@ func (m *MuxSession) OpenStreamWithPayload(ctx context.Context, payload []byte) 
 	})
 	m.setupStreamClose(s)
 	m.setupStreamReset(s)
+	// Mark Open before the OPEN frame leaves: the peer may FIN or RESET
+	// the stream right behind its ACK, and those frames must land on a
+	// stream that is already in the Open state or they are ignored.
+	s.Open()
 	m.streams[id] = s
 	m.mu.Unlock()
 
@@ -156,7 +160,6 @@ func (m *MuxSession) OpenStreamWithPayload(ctx context.Context, payload []byte) 
 	// Wait for ACK
 	select {
 	case <-ackCh:
-		s.Open()
 		return s, nil
 	case <-ctx.Done():
 		m.cleanupPendingOpen(id)
