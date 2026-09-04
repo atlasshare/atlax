@@ -37,8 +37,8 @@ func TestMuxSession_FreedPeerIDsAreNotRecycled(t *testing.T) {
 }
 
 // A STREAM_OPEN for an ID that is already active must not replace the
-// existing session: the live stream keeps working and the duplicate is
-// rejected with a reset.
+// existing session and must not disturb it on either side: the duplicate
+// is dropped and the live stream keeps passing data both ways.
 func TestMuxSession_DuplicateOpenDoesNotReplaceActiveStream(t *testing.T) {
 	relay, agent := newMuxPair(t)
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
@@ -52,12 +52,19 @@ func TestMuxSession_DuplicateOpenDoesNotReplaceActiveStream(t *testing.T) {
 	// Inject a duplicate open for the same ID as if the peer reused it.
 	agent.handleFrame(&Frame{Version: ProtocolVersion, Command: CmdStreamOpen, StreamID: rs.ID()})
 
-	// The original stream must still be the one in the map and still pass data.
+	// The original stream must still be the one in the map and still pass
+	// data in both directions.
 	_, err = rs.Write([]byte("still alive"))
 	require.NoError(t, err)
 	buf := make([]byte, 32)
 	n, err := as.Read(buf)
 	require.NoError(t, err)
 	assert.Equal(t, "still alive", string(buf[:n]))
+	_, err = as.Write([]byte("and back"))
+	require.NoError(t, err)
+	n, err = rs.Read(buf)
+	require.NoError(t, err)
+	assert.Equal(t, "and back", string(buf[:n]))
 	assert.Equal(t, 1, agent.NumStreams())
+	assert.Equal(t, 1, relay.NumStreams())
 }

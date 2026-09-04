@@ -727,28 +727,34 @@ func (m *MuxSession) ownsID(id uint32) bool {
 	return id%2 == m.nextStreamID%2
 }
 
-// acceptPeerOpen validates a peer-initiated STREAM_OPEN. An ID that is
-// already active or that belongs to the local parity space is a
-// protocol violation: the open is answered with STREAM_RESET and the
-// existing stream, if any, is left untouched.
+// acceptPeerOpen validates a peer-initiated STREAM_OPEN. An open for an
+// ID that is already active is dropped without touching the live stream
+// on either side: answering it with a reset would tear down the peer's
+// working stream too. An open for an ID in the local parity space is a
+// protocol violation with nothing live behind it, so it is answered with
+// STREAM_RESET and the peer's pending open fails promptly.
 func (m *MuxSession) acceptPeerOpen(id uint32) bool {
 	m.mu.Lock()
 	_, active := m.streams[id]
 	m.mu.Unlock()
-	if !active && !m.ownsID(id) {
+	switch {
+	case active:
+		m.logger.Warn("mux: dropping duplicate stream open for active stream", "stream_id", id)
+		return false
+	case m.ownsID(id):
+		m.logger.Warn("mux: rejecting stream open in local parity space", "stream_id", id)
+		payload := make([]byte, 4)
+		binary.BigEndian.PutUint32(payload, ResetCodeProtocolError)
+		m.writeQueue.Enqueue(&Frame{
+			Version:  ProtocolVersion,
+			Command:  CmdStreamReset,
+			StreamID: id,
+			Payload:  payload,
+		}, PriorityControl)
+		return false
+	default:
 		return true
 	}
-	m.logger.Warn("mux: rejecting stream open",
-		"stream_id", id, "active", active, "local_parity", m.ownsID(id))
-	payload := make([]byte, 4)
-	binary.BigEndian.PutUint32(payload, ResetCodeProtocolError)
-	m.writeQueue.Enqueue(&Frame{
-		Version:  ProtocolVersion,
-		Command:  CmdStreamReset,
-		StreamID: id,
-		Payload:  payload,
-	}, PriorityControl)
-	return false
 }
 
 // cleanupPendingOpen removes a pending open channel by stream ID.
