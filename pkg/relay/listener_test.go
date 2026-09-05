@@ -17,17 +17,27 @@ import (
 
 	"github.com/atlasshare/atlax/pkg/audit"
 	"github.com/atlasshare/atlax/pkg/protocol"
+
+	"github.com/atlasshare/atlax/internal/testcerts"
 )
 
+// testCertsDir returns a directory with the development certificate
+// hierarchy, generated at test time so the suite never depends on the
+// untracked certs/ directory or its 90-day leaf certificates.
 func testCertsDir() string {
-	return filepath.Join("..", "..", "certs")
+	return testcerts.MustDir()
 }
 
+// skipIfNoCerts is kept for call-site compatibility; certificates are
+// always available now.
 func skipIfNoCerts(t *testing.T) {
 	t.Helper()
-	if _, err := os.Stat(filepath.Join(testCertsDir(), "relay.crt")); err != nil {
-		t.Skip("dev certs not found; run 'make certs-dev'")
-	}
+}
+
+func TestMain(m *testing.M) {
+	code := m.Run()
+	testcerts.Cleanup()
+	os.Exit(code)
 }
 
 func relayTLSConfig(t *testing.T) *tls.Config {
