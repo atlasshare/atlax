@@ -1,75 +1,1949 @@
 {
   "dashboard": {
-    "title": "atlax Relay",
+    "id": null,
     "uid": "atlax-relay",
-    "tags": ["atlax", "relay", "tunnel"],
+    "title": "atlax Relay",
+    "tags": [
+      "atlax",
+      "relay",
+      "tunnel",
+      "authentication"
+    ],
     "timezone": "browser",
-    "refresh": "10s",
+    "editable": true,
+    "schemaVersion": 42,
+    "version": 6,
+    "refresh": "30s",
+    "time": {
+      "from": "now-6h",
+      "to": "now"
+    },
+    "timepicker": {
+      "refresh_intervals": [
+        "10s",
+        "30s",
+        "1m",
+        "5m"
+      ]
+    },
+    "templating": {
+      "list": [
+        {
+          "name": "DS_PROMETHEUS",
+          "label": "Metrics source",
+          "type": "datasource",
+          "query": "prometheus",
+          "refresh": 1
+        },
+        {
+          "name": "relay_job",
+          "label": "Relay scrape job",
+          "type": "query",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "query": "label_values({__name__=~\"atlax_handshakes_limit|atlax_connections_active\"}, job)",
+          "refresh": 1,
+          "multi": true,
+          "includeAll": true,
+          "current": {
+            "text": "All",
+            "value": "$__all"
+          }
+        },
+        {
+          "name": "relay_instance",
+          "label": "Relay instance",
+          "type": "query",
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_PROMETHEUS}"
+          },
+          "query": "label_values({__name__=~\"atlax_handshakes_limit|atlax_connections_active\",job=~\"${relay_job}\"}, instance)",
+          "refresh": 1,
+          "multi": true,
+          "includeAll": true,
+          "current": {
+            "text": "All",
+            "value": "$__all"
+          }
+        },
+        {
+          "name": "DS_LOKI",
+          "label": "Logs source",
+          "type": "datasource",
+          "query": "loki",
+          "refresh": 1
+        },
+        {
+          "name": "log_host",
+          "label": "Log host",
+          "type": "query",
+          "datasource": {
+            "type": "loki",
+            "uid": "${DS_LOKI}"
+          },
+          "query": "label_values({job=\"atlax-relay\"}, host)",
+          "refresh": 1,
+          "multi": true,
+          "includeAll": true,
+          "current": {
+            "text": "All",
+            "value": "$__all"
+          }
+        },
+        {
+          "name": "category",
+          "label": "Log category",
+          "type": "custom",
+          "query": "authenticated,auth_failure,probe,incomplete,admission_rejected",
+          "multi": true,
+          "includeAll": true,
+          "allValue": ".*",
+          "current": {
+            "text": "All",
+            "value": "$__all"
+          }
+        }
+      ]
+    },
     "panels": [
       {
+        "id": 1,
         "title": "Active Agents",
         "type": "stat",
-        "gridPos": {"h": 4, "w": 6, "x": 0, "y": 0},
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 0,
+          "y": 0
+        },
+        "description": "Current connected agents or active streams. These are live gauges, so they change during reconnects; historical samples remain in Prometheus.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": 0
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            },
+            "noValue": "No data",
+            "unit": "short"
+          }
+        },
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "auto",
+          "percentChangeColorMode": "standard",
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "showPercentChange": false,
+          "textMode": "auto",
+          "wideLayout": true
+        },
         "targets": [
-          {"expr": "sum(atlax_connections_active)", "legendFormat": "agents"}
-        ]
+          {
+            "expr": "sum(atlax_connections_active{job=~\"${relay_job}\",instance=~\"${relay_instance}\"})",
+            "legendFormat": "agents",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code",
+            "instant": true,
+            "range": false
+          }
+        ],
+        "pluginVersion": "13.1.0"
       },
       {
+        "id": 2,
         "title": "Active Streams",
-        "type": "stat",
-        "gridPos": {"h": 4, "w": 6, "x": 6, "y": 0},
+        "type": "gauge",
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 6,
+          "y": 0
+        },
+        "description": "Current connected agents or active streams. These are live gauges, so they change during reconnects; historical samples remain in Prometheus.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "thresholds"
+            },
+            "max": 500,
+            "thresholds": {
+              "mode": "percentage",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": 0
+                },
+                {
+                  "color": "#EAB839",
+                  "value": 60
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            },
+            "noValue": "No data",
+            "unit": "short"
+          }
+        },
+        "options": {
+          "barShape": "flat",
+          "barWidthFactor": 0.54,
+          "effects": {
+            "barGlow": false,
+            "centerGlow": false,
+            "gradient": false
+          },
+          "endpointMarker": "point",
+          "minVizHeight": 75,
+          "minVizWidth": 75,
+          "orientation": "auto",
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "segmentCount": 63,
+          "segmentSpacing": 0.3,
+          "shape": "gauge",
+          "showThresholdLabels": false,
+          "showThresholdMarkers": true,
+          "sizing": "auto",
+          "sparkline": true,
+          "textMode": "auto"
+        },
         "targets": [
-          {"expr": "sum(atlax_streams_active)", "legendFormat": "streams"}
-        ]
+          {
+            "expr": "sum(atlax_streams_active{job=~\"${relay_job}\",instance=~\"${relay_instance}\"})",
+            "legendFormat": "streams",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code",
+            "instant": true,
+            "range": false
+          }
+        ],
+        "pluginVersion": "13.1.0"
       },
       {
+        "id": 3,
         "title": "Rejection Rate",
         "type": "stat",
-        "gridPos": {"h": 4, "w": 6, "x": 12, "y": 0},
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 12,
+          "y": 0
+        },
+        "description": "Client traffic rejections per second, separate from authentication attempts on the agent port.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": 0
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            },
+            "noValue": "No data",
+            "unit": "ops"
+          }
+        },
+        "options": {
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto",
+          "orientation": "auto",
+          "percentChangeColorMode": "standard",
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "showPercentChange": false,
+          "textMode": "auto",
+          "wideLayout": true
+        },
         "targets": [
-          {"expr": "sum(rate(atlax_clients_rejected_total[5m]))", "legendFormat": "rejected/sec"}
-        ]
+          {
+            "expr": "sum(rate(atlax_clients_rejected_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\"}[$__rate_interval]))",
+            "legendFormat": "rejected/sec",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code",
+            "instant": true,
+            "range": false
+          }
+        ],
+        "pluginVersion": "13.1.0"
       },
       {
-        "title": "Total Streams (all time)",
+        "id": 4,
+        "title": "Streams in selected range",
         "type": "stat",
-        "gridPos": {"h": 4, "w": 6, "x": 18, "y": 0},
+        "gridPos": {
+          "h": 4,
+          "w": 6,
+          "x": 18,
+          "y": 0
+        },
+        "description": "Streams opened within the selected time range, estimated from stored Prometheus samples. Accounts for observed process counter resets; limited by Prometheus retention. This is not a lifetime total.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "fixedColor": "blue",
+              "mode": "fixed"
+            },
+            "max": 2000000,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": 0
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            },
+            "noValue": "No data",
+            "unit": "short"
+          }
+        },
+        "options": {
+          "colorMode": "none",
+          "graphMode": "area",
+          "justifyMode": "center",
+          "orientation": "horizontal",
+          "percentChangeColorMode": "standard",
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "showPercentChange": false,
+          "textMode": "value_and_name",
+          "wideLayout": false
+        },
         "targets": [
-          {"expr": "sum(atlax_streams_total)", "legendFormat": "total"}
-        ]
+          {
+            "expr": "sum(increase(atlax_streams_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\"}[$__range]))",
+            "legendFormat": "total",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code",
+            "instant": true,
+            "range": false
+          }
+        ],
+        "pluginVersion": "13.1.0"
       },
       {
+        "id": 5,
         "title": "Active Streams per Customer",
         "type": "timeseries",
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 4},
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 4
+        },
+        "description": "Current connected agents or active streams. These are live gauges, so they change during reconnects; historical samples remain in Prometheus.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisBorderShow": false,
+              "axisCenteredZero": false,
+              "axisColorMode": "text",
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "barWidthFactor": 0.6,
+              "drawStyle": "line",
+              "fillOpacity": 0,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "insertNulls": false,
+              "lineInterpolation": "linear",
+              "lineWidth": 1,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "showValues": false,
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": 0
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            },
+            "noValue": "No data",
+            "unit": "short"
+          }
+        },
+        "options": {
+          "annotations": {
+            "clustering": -1,
+            "multiLane": false
+          },
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "enableFacetedFilter": false,
+            "overflow": "ellipsis",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "hideZeros": false,
+            "mode": "single",
+            "sort": "none"
+          }
+        },
         "targets": [
-          {"expr": "atlax_streams_active", "legendFormat": "{{ customer_id }}"}
-        ]
+          {
+            "expr": "atlax_streams_active{job=~\"${relay_job}\",instance=~\"${relay_instance}\"}",
+            "legendFormat": "{{ customer_id }}",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code"
+          }
+        ],
+        "pluginVersion": "13.1.0"
       },
       {
+        "id": 6,
         "title": "Stream Open Rate per Customer",
         "type": "timeseries",
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 4},
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 4
+        },
+        "description": "",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisBorderShow": false,
+              "axisCenteredZero": false,
+              "axisColorMode": "text",
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "barWidthFactor": 0.6,
+              "drawStyle": "line",
+              "fillOpacity": 0,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "insertNulls": false,
+              "lineInterpolation": "linear",
+              "lineWidth": 1,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "showValues": false,
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": 0
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            },
+            "noValue": "No data",
+            "unit": "ops"
+          }
+        },
+        "options": {
+          "annotations": {
+            "clustering": -1,
+            "multiLane": false
+          },
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "enableFacetedFilter": false,
+            "overflow": "ellipsis",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "hideZeros": false,
+            "mode": "single",
+            "sort": "none"
+          }
+        },
         "targets": [
-          {"expr": "rate(atlax_streams_total[5m])", "legendFormat": "{{ customer_id }}"}
-        ]
+          {
+            "expr": "rate(atlax_streams_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\"}[$__rate_interval])",
+            "legendFormat": "{{ customer_id }}",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code"
+          }
+        ],
+        "pluginVersion": "13.1.0"
       },
       {
+        "id": 7,
         "title": "Agent Connections per Customer",
         "type": "timeseries",
-        "gridPos": {"h": 8, "w": 12, "x": 0, "y": 12},
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 0,
+          "y": 12
+        },
+        "description": "Current connected agents or active streams. These are live gauges, so they change during reconnects; historical samples remain in Prometheus.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisBorderShow": false,
+              "axisCenteredZero": false,
+              "axisColorMode": "text",
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "barWidthFactor": 0.6,
+              "drawStyle": "line",
+              "fillOpacity": 0,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "insertNulls": false,
+              "lineInterpolation": "linear",
+              "lineWidth": 1,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "showValues": false,
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": 0
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            },
+            "noValue": "No data",
+            "unit": "short"
+          }
+        },
+        "options": {
+          "annotations": {
+            "clustering": -1,
+            "multiLane": false
+          },
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "enableFacetedFilter": false,
+            "overflow": "ellipsis",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "hideZeros": false,
+            "mode": "single",
+            "sort": "none"
+          }
+        },
         "targets": [
-          {"expr": "atlax_connections_active", "legendFormat": "{{ customer_id }}"}
+          {
+            "expr": "atlax_connections_active{job=~\"${relay_job}\",instance=~\"${relay_instance}\"}",
+            "legendFormat": "{{ customer_id }}",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code"
+          }
+        ],
+        "pluginVersion": "13.1.0"
+      },
+      {
+        "id": 8,
+        "title": "Client Rejections by Reason",
+        "type": "timeseries",
+        "gridPos": {
+          "h": 8,
+          "w": 12,
+          "x": 12,
+          "y": 12
+        },
+        "description": "",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "axisBorderShow": false,
+              "axisCenteredZero": false,
+              "axisColorMode": "text",
+              "axisLabel": "",
+              "axisPlacement": "auto",
+              "barAlignment": 0,
+              "barWidthFactor": 0.6,
+              "drawStyle": "line",
+              "fillOpacity": 0,
+              "gradientMode": "none",
+              "hideFrom": {
+                "legend": false,
+                "tooltip": false,
+                "viz": false
+              },
+              "insertNulls": false,
+              "lineInterpolation": "linear",
+              "lineWidth": 1,
+              "pointSize": 5,
+              "scaleDistribution": {
+                "type": "linear"
+              },
+              "showPoints": "auto",
+              "showValues": false,
+              "spanNulls": false,
+              "stacking": {
+                "group": "A",
+                "mode": "none"
+              },
+              "thresholdsStyle": {
+                "mode": "off"
+              }
+            },
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": 0
+                },
+                {
+                  "color": "red",
+                  "value": 80
+                }
+              ]
+            },
+            "noValue": "No data",
+            "unit": "ops"
+          }
+        },
+        "options": {
+          "annotations": {
+            "clustering": -1,
+            "multiLane": false
+          },
+          "legend": {
+            "calcs": [],
+            "displayMode": "list",
+            "enableFacetedFilter": false,
+            "overflow": "ellipsis",
+            "placement": "bottom",
+            "showLegend": true
+          },
+          "tooltip": {
+            "hideZeros": false,
+            "mode": "single",
+            "sort": "none"
+          }
+        },
+        "targets": [
+          {
+            "expr": "rate(atlax_clients_rejected_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\"}[$__rate_interval])",
+            "legendFormat": "{{ customer_id }} ({{ reason }})",
+            "refId": "A",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code"
+          }
+        ],
+        "pluginVersion": "13.1.0"
+      },
+      {
+        "id": 9,
+        "title": "Agent port authentication",
+        "type": "text",
+        "gridPos": {
+          "x": 0,
+          "y": 20,
+          "w": 18,
+          "h": 4
+        },
+        "description": "",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "options": {
+          "mode": "markdown",
+          "content": "Verified certificates, rejected credentials, protocol probes, incomplete handshakes and capacity rejections are separate. A **probe is not proof of a bot**. Admission metrics require the enterprise relay upgrade; Coverage shows how much of the selection is instrumented."
+        }
+      },
+      {
+        "id": 10,
+        "title": "Relay up",
+        "type": "stat",
+        "gridPos": {
+          "x": 18,
+          "y": 20,
+          "w": 6,
+          "h": 4
+        },
+        "description": "1 means Prometheus can scrape the selected relay. No data is unknown, never a healthy zero.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {},
+            "decimals": 0
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "min(up{job=~\"${relay_job}\",instance=~\"${relay_instance}\"})",
+            "legendFormat": "up",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code",
+            "instant": true,
+            "range": false
+          }
         ]
       },
       {
-        "title": "Client Rejections by Reason",
-        "type": "timeseries",
-        "gridPos": {"h": 8, "w": 12, "x": 12, "y": 12},
+        "id": 11,
+        "title": "Pending",
+        "type": "stat",
+        "gridPos": {
+          "x": 0,
+          "y": 24,
+          "w": 6,
+          "h": 4
+        },
+        "description": "Worst selected relay. Applies only before authentication. Missing means the relay has not exported admission metrics.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {},
+            "decimals": 0
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        },
         "targets": [
-          {"expr": "rate(atlax_clients_rejected_total[5m])", "legendFormat": "{{ customer_id }} ({{ reason }})"}
+          {
+            "refId": "A",
+            "expr": "max(atlax_handshakes_pending{job=~\"${relay_job}\",instance=~\"${relay_instance}\"} / atlax_handshakes_limit{job=~\"${relay_job}\",instance=~\"${relay_instance}\"})",
+            "legendFormat": "utilization",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code",
+            "instant": true,
+            "range": false
+          }
+        ]
+      },
+      {
+        "id": 12,
+        "title": "Verified",
+        "type": "stat",
+        "gridPos": {
+          "x": 0,
+          "y": 28,
+          "w": 6,
+          "h": 4
+        },
+        "description": "Counter increase over the selected time range, estimated between scrapes. This does not count existing connections or prove intent.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {},
+            "decimals": 0
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum(increase(atlax_handshakes_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\",category=\"authenticated\"}[$__range]))",
+            "legendFormat": "authenticated",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code",
+            "instant": true,
+            "range": false
+          }
+        ]
+      },
+      {
+        "id": 13,
+        "title": "Cert rejected",
+        "type": "stat",
+        "gridPos": {
+          "x": 6,
+          "y": 28,
+          "w": 6,
+          "h": 4
+        },
+        "description": "Counter increase over the selected time range, estimated between scrapes. This does not count existing connections or prove intent.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {},
+            "decimals": 0
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum(increase(atlax_handshakes_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\",category=\"auth_failure\"}[$__range]))",
+            "legendFormat": "auth_failure",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code",
+            "instant": true,
+            "range": false
+          }
+        ]
+      },
+      {
+        "id": 14,
+        "title": "Probes",
+        "type": "stat",
+        "gridPos": {
+          "x": 12,
+          "y": 28,
+          "w": 6,
+          "h": 4
+        },
+        "description": "Counter increase over the selected time range, estimated between scrapes. This does not count existing connections or prove intent.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {},
+            "decimals": 0
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum(increase(atlax_handshakes_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\",category=\"probe\"}[$__range]))",
+            "legendFormat": "probe",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code",
+            "instant": true,
+            "range": false
+          }
+        ]
+      },
+      {
+        "id": 15,
+        "title": "Incomplete",
+        "type": "stat",
+        "gridPos": {
+          "x": 18,
+          "y": 28,
+          "w": 6,
+          "h": 4
+        },
+        "description": "Counter increase over the selected time range, estimated between scrapes. This does not count existing connections or prove intent.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {},
+            "decimals": 0
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum(increase(atlax_handshakes_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\",category=\"incomplete\"}[$__range]))",
+            "legendFormat": "incomplete",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code",
+            "instant": true,
+            "range": false
+          }
+        ]
+      },
+      {
+        "id": 16,
+        "title": "Connection outcomes per second",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 32,
+          "w": 12,
+          "h": 8
+        },
+        "description": "",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "fillOpacity": 8,
+              "showPoints": "never",
+              "spanNulls": false
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {
+            "displayMode": "table",
+            "placement": "bottom",
+            "calcs": [
+              "lastNotNull",
+              "max"
+            ]
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum by (category) (rate(atlax_handshakes_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\"}[$__rate_interval]))",
+            "legendFormat": "{{category}}",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code"
+          }
+        ]
+      },
+      {
+        "id": 17,
+        "title": "Pending / limit",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 12,
+          "y": 32,
+          "w": 12,
+          "h": 8
+        },
+        "description": "Authenticated tunnels are excluded from both occupancy and admission checks.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "fillOpacity": 8,
+              "showPoints": "never",
+              "spanNulls": false
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {
+            "displayMode": "table",
+            "placement": "bottom",
+            "calcs": [
+              "lastNotNull",
+              "max"
+            ]
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "atlax_handshakes_pending{job=~\"${relay_job}\",instance=~\"${relay_instance}\"}",
+            "legendFormat": "pending {{instance}}",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code"
+          },
+          {
+            "refId": "B",
+            "expr": "atlax_handshakes_limit{job=~\"${relay_job}\",instance=~\"${relay_instance}\"}",
+            "legendFormat": "limit {{instance}}",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code"
+          }
+        ]
+      },
+      {
+        "id": 18,
+        "title": "Certificate failures by reason",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 40,
+          "w": 12,
+          "h": 8
+        },
+        "description": "",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "fillOpacity": 8,
+              "showPoints": "never",
+              "spanNulls": false
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {
+            "displayMode": "table",
+            "placement": "bottom",
+            "calcs": [
+              "lastNotNull",
+              "max"
+            ]
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum by (reason) (rate(atlax_handshakes_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\",category=\"auth_failure\"}[$__rate_interval]))",
+            "legendFormat": "{{reason}}",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code"
+          }
+        ]
+      },
+      {
+        "id": 19,
+        "title": "Probe and incomplete reasons",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 12,
+          "y": 40,
+          "w": 12,
+          "h": 8
+        },
+        "description": "",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "fillOpacity": 8,
+              "showPoints": "never",
+              "spanNulls": false
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {
+            "displayMode": "table",
+            "placement": "bottom",
+            "calcs": [
+              "lastNotNull",
+              "max"
+            ]
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum by (category,reason) (rate(atlax_handshakes_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\",category=~\"probe|incomplete\"}[$__rate_interval]))",
+            "legendFormat": "{{category}} / {{reason}}",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code"
+          }
+        ]
+      },
+      {
+        "id": 20,
+        "title": "Admission capacity rejections",
+        "type": "timeseries",
+        "gridPos": {
+          "x": 0,
+          "y": 48,
+          "w": 24,
+          "h": 8
+        },
+        "description": "New sockets closed because every pending slot is occupied. Does not disconnect established tunnels; reconnects may retry during saturation.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "ops",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {
+              "drawStyle": "line",
+              "lineInterpolation": "linear",
+              "lineWidth": 2,
+              "fillOpacity": 8,
+              "showPoints": "never",
+              "spanNulls": false
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "legend": {
+            "displayMode": "table",
+            "placement": "bottom",
+            "calcs": [
+              "lastNotNull",
+              "max"
+            ]
+          },
+          "tooltip": {
+            "mode": "multi",
+            "sort": "desc"
+          }
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum by (instance) (rate(atlax_handshakes_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\",category=\"admission_rejected\"}[$__rate_interval]))",
+            "legendFormat": "{{instance}}",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code"
+          }
+        ]
+      },
+      {
+        "id": 21,
+        "title": "Log evidence",
+        "type": "text",
+        "gridPos": {
+          "x": 0,
+          "y": 56,
+          "w": 24,
+          "h": 4
+        },
+        "description": "",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "options": {
+          "mode": "markdown",
+          "content": "Search canonical audit events once per attempt. Certificate events are separate from probes and incomplete handshakes. IP addresses and identities are queryable fields, not indexed labels. **Historical auth.failure** has its own view because old records cannot reliably identify probes. No data may mean log ingestion is unavailable; check audit drops above."
+        }
+      },
+      {
+        "id": 22,
+        "title": "Certificate authentication events",
+        "type": "logs",
+        "gridPos": {
+          "x": 0,
+          "y": 60,
+          "w": 24,
+          "h": 9
+        },
+        "description": "Trusted customer_id is populated only after successful certificate and identity validation. A verified certificate is not evidence of a particular human operator.",
+        "datasource": {
+          "type": "loki",
+          "uid": "${DS_LOKI}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "options": {
+          "showTime": true,
+          "showLabels": false,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": true,
+          "sortOrder": "Descending",
+          "dedupStrategy": "none",
+          "enableLogDetails": true
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "{job=\"atlax-relay\",host=~\"${log_host}\"} | json | __error__=\"\" | msg=\"audit\" | meta_category!=\"\" | action=~\"auth.success|auth.failure\" | meta_category=~\"${category:regex}\"",
+            "legendFormat": "",
+            "datasource": {
+              "type": "loki",
+              "uid": "${DS_LOKI}"
+            },
+            "editorMode": "code"
+          }
+        ]
+      },
+      {
+        "id": 23,
+        "title": "Probe, incomplete and admission events",
+        "type": "logs",
+        "gridPos": {
+          "x": 0,
+          "y": 69,
+          "w": 24,
+          "h": 10
+        },
+        "description": "",
+        "datasource": {
+          "type": "loki",
+          "uid": "${DS_LOKI}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "options": {
+          "showTime": true,
+          "showLabels": false,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": true,
+          "sortOrder": "Descending",
+          "dedupStrategy": "none",
+          "enableLogDetails": true
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "{job=\"atlax-relay\",host=~\"${log_host}\"} | json | __error__=\"\" | msg=\"audit\" | action=~\"connection.probe|connection.incomplete|connection.rejected\" | meta_category=~\"${category:regex}\"",
+            "legendFormat": "",
+            "datasource": {
+              "type": "loki",
+              "uid": "${DS_LOKI}"
+            },
+            "editorMode": "code"
+          }
+        ]
+      },
+      {
+        "id": 24,
+        "title": "Historical auth.failure without classification",
+        "type": "logs",
+        "gridPos": {
+          "x": 0,
+          "y": 79,
+          "w": 24,
+          "h": 8
+        },
+        "description": "Do not interpret these old entries as confirmed agent failures or bots. Their handshake warning may provide context.",
+        "datasource": {
+          "type": "loki",
+          "uid": "${DS_LOKI}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "options": {
+          "showTime": true,
+          "showLabels": false,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": true,
+          "sortOrder": "Descending",
+          "dedupStrategy": "none",
+          "enableLogDetails": true
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "{job=\"atlax-relay\",host=~\"${log_host}\"} | json | __error__=\"\" | msg=\"audit\" | action=\"auth.failure\" | meta_category=\"\"",
+            "legendFormat": "",
+            "datasource": {
+              "type": "loki",
+              "uid": "${DS_LOKI}"
+            },
+            "editorMode": "code"
+          }
+        ]
+      },
+      {
+        "id": 25,
+        "title": "Relay warnings and errors",
+        "type": "logs",
+        "gridPos": {
+          "x": 0,
+          "y": 87,
+          "w": 24,
+          "h": 8
+        },
+        "description": "",
+        "datasource": {
+          "type": "loki",
+          "uid": "${DS_LOKI}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "palette-classic"
+            },
+            "custom": {}
+          },
+          "overrides": []
+        },
+        "options": {
+          "showTime": true,
+          "showLabels": false,
+          "showCommonLabels": false,
+          "wrapLogMessage": true,
+          "prettifyLogMessage": true,
+          "sortOrder": "Descending",
+          "dedupStrategy": "none",
+          "enableLogDetails": true
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "{job=\"atlax-relay\",host=~\"${log_host}\"} | json | __error__=\"\" | level=~\"WARN|ERROR\"",
+            "legendFormat": "",
+            "datasource": {
+              "type": "loki",
+              "uid": "${DS_LOKI}"
+            },
+            "editorMode": "code"
+          }
+        ]
+      },
+      {
+        "id": 26,
+        "title": "Blocked",
+        "type": "stat",
+        "gridPos": {
+          "x": 6,
+          "y": 24,
+          "w": 6,
+          "h": 4
+        },
+        "description": "New sockets rejected before TLS. Established tunnels are never evicted.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {},
+            "decimals": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum(increase(atlax_handshakes_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\",category=\"admission_rejected\"}[$__range]))",
+            "legendFormat": "events",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code",
+            "instant": true,
+            "range": false
+          }
+        ]
+      },
+      {
+        "id": 27,
+        "title": "Audit drops",
+        "type": "stat",
+        "gridPos": {
+          "x": 12,
+          "y": 24,
+          "w": 6,
+          "h": 4
+        },
+        "description": "Audit enqueue timeout, cancellation, or emitter failure. Nonzero means searchable log evidence may be incomplete; handshake outcome counters still include these attempts.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "short",
+            "noValue": "No data",
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {},
+            "decimals": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "green",
+                  "value": null
+                },
+                {
+                  "color": "red",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "sum(increase(atlax_admission_audit_dropped_total{job=~\"${relay_job}\",instance=~\"${relay_instance}\"}[$__range]))",
+            "legendFormat": "events",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code",
+            "instant": true,
+            "range": false
+          }
+        ]
+      },
+      {
+        "id": 28,
+        "title": "Coverage",
+        "type": "stat",
+        "gridPos": {
+          "x": 18,
+          "y": 24,
+          "w": 6,
+          "h": 4
+        },
+        "description": "Fraction of selected relay targets exporting the new admission metrics. Below 100% means admission panels cover only part of the selection. No data means the target set is unknown.",
+        "datasource": {
+          "type": "prometheus",
+          "uid": "${DS_PROMETHEUS}"
+        },
+        "fieldConfig": {
+          "defaults": {
+            "unit": "percentunit",
+            "noValue": "No data",
+            "color": {
+              "mode": "thresholds"
+            },
+            "custom": {},
+            "decimals": 0,
+            "thresholds": {
+              "mode": "absolute",
+              "steps": [
+                {
+                  "color": "red",
+                  "value": null
+                },
+                {
+                  "color": "green",
+                  "value": 1
+                }
+              ]
+            }
+          },
+          "overrides": []
+        },
+        "options": {
+          "reduceOptions": {
+            "calcs": [
+              "lastNotNull"
+            ],
+            "fields": "",
+            "values": false
+          },
+          "orientation": "auto",
+          "textMode": "auto",
+          "colorMode": "value",
+          "graphMode": "area",
+          "justifyMode": "auto"
+        },
+        "targets": [
+          {
+            "refId": "A",
+            "expr": "(count(atlax_handshakes_limit{job=~\"${relay_job}\",instance=~\"${relay_instance}\"}) or vector(0)) / count(up{job=~\"${relay_job}\",instance=~\"${relay_instance}\"})",
+            "legendFormat": "coverage",
+            "datasource": {
+              "type": "prometheus",
+              "uid": "${DS_PROMETHEUS}"
+            },
+            "editorMode": "code",
+            "instant": true,
+            "range": false
+          }
         ]
       }
-    ]
+    ],
+    "annotations": {
+      "list": [
+        {
+          "builtIn": 1,
+          "datasource": {
+            "type": "grafana",
+            "uid": "-- Grafana --"
+          },
+          "enable": true,
+          "hide": true,
+          "iconColor": "rgba(0, 211, 255, 1)",
+          "name": "Annotations & Alerts",
+          "type": "dashboard"
+        }
+      ]
+    }
   }
 }
